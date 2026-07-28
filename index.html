@@ -155,7 +155,7 @@
       return new Date(Date.UTC(yr, mo, da, hr, mi, se));
     }
 
-    // --- CSV PARSER (SharePoint Export) ---
+    // --- CSV PARSER (SHAREPOINT ENHANCED) ---
     async function handleCSVUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -170,23 +170,50 @@
     }
 
     function parseCSV(csvText) {
-      const lines = csvText.trim().split('\n');
+      // 1. Remove UTF-8 Byte Order Mark (BOM) if present
+      const cleanText = csvText.replace(/^\uFEFF/, '').trim();
+      const lines = cleanText.split(/\r?\n/).filter(line => line.trim() !== '');
+      
       if (lines.length < 2) return [];
 
+      // 2. Auto-detect delimiter (comma vs. semicolon)
+      const delimiter = lines[0].includes(';') ? ';' : ',';
       const slots = [];
 
+      // Helper function to robustly parse various SharePoint date strings
+      function parseFlexibleDate(dateStr) {
+        if (!dateStr) return null;
+        let d = new Date(dateStr);
+        
+        if (!isNaN(d.getTime())) return d;
+
+        // Handle US SharePoint format: "MM/DD/YYYY, HH:MM:SS AM/PM" or "MM/DD/YYYY HH:MM AM"
+        const cleanedStr = dateStr.replace(',', '');
+        d = new Date(cleanedStr);
+        if (!isNaN(d.getTime())) return d;
+
+        return null;
+      }
+
+      // 3. Process CSV Rows (skipping header row)
       for (let i = 1; i < lines.length; i++) {
-        const row = lines[i].split(',').map(r => r.trim().replace(/^"|"$/g, ''));
+        // Regex splits by delimiter while respecting quoted values
+        const row = lines[i].split(new RegExp(`${delimiter}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`))
+                            .map(r => r.trim().replace(/^"|"$/g, ''));
+
         if (row.length < 3) continue;
 
-        let student = row[0] || `Student #${i}`;
-        let start = new Date(row[1]);
-        let end = new Date(row[2]);
+        const student = row[0] || `Student #${i}`;
+        const start = parseFlexibleDate(row[1]);
+        const end = parseFlexibleDate(row[2]);
 
-        if (!isNaN(start) && !isNaN(end)) {
+        if (start && end) {
           slots.push({ student, start, end });
+        } else {
+          console.warn(`Row ${i} skipped - Invalid date format:`, { startStr: row[1], endStr: row[2] });
         }
       }
+
       return slots;
     }
 
