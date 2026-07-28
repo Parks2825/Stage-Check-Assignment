@@ -32,19 +32,19 @@
           📅 1. Import Instructor Calendars
         </h2>
         <p class="text-xs text-slate-500 mb-4">
-          Select multiple <code>.ics</code> files at once (hold Ctrl/Cmd to select 16+ files).
+          Select multiple <code>.ics</code> files at once (hold Ctrl/Cmd for 16+ files).
         </p>
         <input type="file" id="icsInput" multiple accept=".ics" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
         <div id="instructorStats" class="mt-4 text-xs font-semibold text-slate-600">No calendars loaded.</div>
       </div>
 
-      <!-- SharePoint File -->
+      <!-- SharePoint CSV Import -->
       <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
         <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
           📊 2. Import SharePoint File (CSV)
         </h2>
         <p class="text-xs text-slate-500 mb-4">
-          Upload CSV with columns: <code>Student, Start, End</code> (or <code>Date, StartTime, EndTime</code>).
+          Upload CSV with columns: <code>Student, Start, End</code> (or exported SharePoint list).
         </p>
         <input type="file" id="csvInput" accept=".csv" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer"/>
         <div id="studentStats" class="mt-4 text-xs font-semibold text-slate-600">No student file loaded.</div>
@@ -52,24 +52,22 @@
 
     </div>
 
-    <!-- COMPARISON RESULTS SECTION -->
+    <!-- COMPARISON RESULTS TABLE -->
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Availability Analysis</h2>
           <p class="text-xs text-slate-500">Shows which instructors are free during student availability windows</p>
         </div>
-        <div class="flex gap-2 w-full md:w-auto">
-          <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student or instructor..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-        </div>
+        <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student or instructor..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
 
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse text-sm">
           <thead>
             <tr class="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200">
-              <th class="p-4">Student Window</th>
-              <th class="p-4">Requested Time</th>
+              <th class="p-4">Student</th>
+              <th class="p-4">Requested Window</th>
               <th class="p-4">Available Instructors</th>
               <th class="p-4">Unavailable Instructors</th>
             </tr>
@@ -77,7 +75,7 @@
           <tbody id="resultsTable" class="divide-y divide-slate-100">
             <tr>
               <td colspan="4" class="p-8 text-center text-slate-400">
-                Upload instructor calendars and a SharePoint file above (or click "Load Demo Data") to view results.
+                Upload instructor calendars and a SharePoint CSV file above to view results.
               </td>
             </tr>
           </tbody>
@@ -91,7 +89,6 @@
     let instructorsData = {}; // { InstructorName: [ { start: Date, end: Date, summary: string } ] }
     let studentSlots = [];     // [ { student: string, start: Date, end: Date } ]
 
-    // Listeners
     document.getElementById('icsInput').addEventListener('change', handleICSUpload);
     document.getElementById('csvInput').addEventListener('change', handleCSVUpload);
 
@@ -141,7 +138,6 @@
 
     function parseICSTime(str) {
       if (!str) return null;
-      // Handle format: YYYYMMDDTHHMMSSZ or YYYYMMDDTHHMMSS
       const clean = str.trim().replace(/Z$/, '');
       if (clean.length < 8) return null;
       
@@ -177,7 +173,6 @@
       const lines = csvText.trim().split('\n');
       if (lines.length < 2) return [];
 
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z0-9]/g, ''));
       const slots = [];
 
       for (let i = 1; i < lines.length; i++) {
@@ -206,7 +201,7 @@
       tbody.innerHTML = '';
 
       if (studentSlots.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">Please load student availability CSV.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">Please load a student availability CSV.</td></tr>`;
         return;
       }
 
@@ -224,7 +219,6 @@
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
-          // Conflict check: Event starts before slot ends AND event ends after slot starts
           const conflict = events.find(ev => ev.start < slot.end && ev.end > slot.start);
           
           if (conflict) {
@@ -270,11 +264,9 @@
       const todayAt14 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0);
       const todayAt15 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 0);
 
-      // Populate 16 instructors
       instructorsData = {};
       for (let i = 1; i <= 16; i++) {
         const name = `Instructor ${i}`;
-        // Give even instructors a conflict at 10 AM, odd ones at 2 PM
         if (i % 2 === 0) {
           instructorsData[name] = [{ start: todayAt10, end: todayAt11, summary: 'Department Meeting' }];
         } else {
@@ -282,7 +274,6 @@
         }
       }
 
-      // Populate student slots
       studentSlots = [
         { student: 'Alex Smith', start: todayAt10, end: todayAt11 },
         { student: 'Jordan Lee', start: todayAt14, end: todayAt15 },
@@ -296,4 +287,3 @@
   </script>
 </body>
 </html>
-
