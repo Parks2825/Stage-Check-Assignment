@@ -3,98 +3,75 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Instructor & Student Schedule Matcher</title>
+  <title>Outlook Shared Calendar Matcher</title>
   <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- MSAL.js for Microsoft 365 Authentication -->
+  <script src="https://alcdn.msauth.net/browser/2.35.0/js/msal-browser.min.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans min-h-screen">
 
   <header class="bg-indigo-700 text-white py-6 shadow-md">
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
-        <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Mode: Calendar blocks indicate <strong>Instructor Availability / Duty Hours</strong></p>
+        <h1 class="text-2xl font-bold">Outlook & SharePoint Availability Matcher</h1>
+        <p class="text-indigo-200 text-sm">Directly syncs Outlook Shared Calendars via Microsoft Graph API</p>
       </div>
-      <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
-        ⚡ Load Demo Data
+      <button id="msLoginBtn" onclick="handleOutlookLogin()" class="bg-emerald-500 hover:bg-emerald-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm flex items-center gap-2">
+        <svg class="w-4 h-4 fill-current" viewBox="0 0 23 23"><path d="M0 0h11v11H0zM12 0h11v11H12zM0 12h11v11H0zM12 12h11v11H12z"/></svg>
+        <span id="loginBtnText">Sign in with Microsoft</span>
       </button>
     </div>
   </header>
 
   <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-    <!-- FILE & LINK IMPORT SECTION -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      
-      <!-- Instructor Calendars (URL + File Upload) -->
-      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
-        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-          📅 1. Import Instructor Calendars
-        </h2>
-        
-        <!-- URL Input -->
-        <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1">Paste .ics Calendar Link (URL)</label>
-          <div class="flex gap-2">
-            <input type="url" id="icsUrlInput" placeholder="https://example.com/calendar.ics" class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-            <button onclick="handleURLAdd()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-md transition whitespace-nowrap">
-              Add Link
-            </button>
-          </div>
-        </div>
-
-        <div class="relative flex py-1 items-center">
-          <div class="flex-grow border-t border-slate-200"></div>
-          <span class="flex-shrink mx-2 text-xs text-slate-400 font-medium">OR upload .ics files</span>
-          <div class="flex-grow border-t border-slate-200"></div>
-        </div>
-
-        <!-- File Input -->
-        <div>
-          <input type="file" id="icsInput" multiple accept=".ics" class="block w-full text-sm text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
-        </div>
-
-        <div id="instructorStats" class="text-xs font-semibold text-slate-600 pt-1">No calendars loaded.</div>
-      </div>
-
-      <!-- SharePoint CSV Import -->
+      <!-- Outlook Status -->
       <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
         <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-          📊 2. Import SharePoint File (CSV)
+          📅 1. Outlook Shared Calendars
         </h2>
         <p class="text-xs text-slate-500 mb-4">
-          Upload CSV with columns: <code>Student, Start, End</code> (or exported SharePoint list).
+          Once signed in, the app automatically detects all shared instructor calendars in your Outlook account.
+        </p>
+        <div id="outlookStatus" class="text-xs font-semibold text-slate-600">Not signed in.</div>
+        <div id="calendarList" class="mt-3 text-xs text-slate-500 space-y-1 max-h-32 overflow-y-auto"></div>
+      </div>
+
+      <!-- SharePoint Student CSV -->
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+        <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+          📊 2. Import Student Availability (CSV)
+        </h2>
+        <p class="text-xs text-slate-500 mb-4">
+          Upload CSV with columns: <code>Student, Start, End</code>.
         </p>
         <input type="file" id="csvInput" accept=".csv" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer"/>
         <div id="studentStats" class="mt-4 text-xs font-semibold text-slate-600">No student file loaded.</div>
       </div>
-
     </div>
 
-    <!-- COMPARISON RESULTS TABLE -->
+    <!-- RESULTS TABLE -->
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
-      <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h2 class="text-xl font-bold text-slate-800">3. Availability Analysis</h2>
-          <p class="text-xs text-slate-500">Instructors are marked <strong>available</strong> if they have an active block matching the student's request</p>
-        </div>
-        <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student or instructor..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+      <div class="p-6 border-b border-slate-100 flex justify-between items-center">
+        <h2 class="text-xl font-bold text-slate-800">3. Availability Matching</h2>
+        <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm"/>
       </div>
-
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse text-sm">
           <thead>
-            <tr class="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200">
+            <tr class="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold border-b border-slate-200">
               <th class="p-4">Student</th>
               <th class="p-4">Requested Window</th>
-              <th class="p-4">Available Instructors (On Duty)</th>
-              <th class="p-4">Unavailable Instructors (Off Duty)</th>
+              <th class="p-4">Available (On Duty)</th>
+              <th class="p-4">Unavailable (Off Duty)</th>
             </tr>
           </thead>
           <tbody id="resultsTable" class="divide-y divide-slate-100">
             <tr>
               <td colspan="4" class="p-8 text-center text-slate-400">
-                Load instructor calendars (via link or upload) and a SharePoint CSV file above to view results.
+                Sign into Microsoft and load a student availability file to start.
               </td>
             </tr>
           </tbody>
@@ -105,197 +82,127 @@
   </main>
 
   <script>
-    let instructorsData = {}; // { InstructorName: [ { start: Date, end: Date, summary: string } ] }
-    let studentSlots = [];     // [ { student: string, start: Date, end: Date } ]
+    // --- AZURE / MSAL CONFIGURATION ---
+    const msalConfig = {
+      auth: {
+        clientId: "YOUR_AZURE_CLIENT_ID_HERE", // Insert your Registered App Client ID
+        authority: "https://login.microsoftonline.com/common",
+        redirectUri: window.location.href.split('#')[0]
+      }
+    };
 
-    document.getElementById('icsInput').addEventListener('change', handleICSUpload);
+    const msalInstance = new msal.PublicClientApplication(msalConfig);
+    let instructorsData = {};
+    let studentSlots = [];
+
     document.getElementById('csvInput').addEventListener('change', handleCSVUpload);
 
-    // --- FETCH ICS FROM URL / LINK ---
-    async function handleURLAdd() {
-      const urlInput = document.getElementById('icsUrlInput');
-      let url = urlInput.value.trim();
-
-      if (!url) {
-        alert("Please enter a valid .ics calendar URL.");
-        return;
-      }
-
-      if (!/^https?:\/\//i.test(url)) {
-        url = 'https://' + url;
-      }
-
-      const urlParts = url.split('/');
-      let instructorName = urlParts[urlParts.length - 1].replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, " ");
-      if (!instructorName || instructorName.length < 3) {
-        instructorName = `Instructor (${Object.keys(instructorsData).length + 1})`;
-      }
-
+    // --- LOGIN & FETCH OUTLOOK CALENDARS ---
+    async function handleOutlookLogin() {
       try {
-        let response = await fetch(url);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const loginResponse = await msalInstance.loginPopup({
+          scopes: ["Calendars.Read", "Calendars.Read.Shared"]
+        });
 
-        const text = await response.text();
-        instructorsData[instructorName] = parseICS(text);
-        
-        urlInput.value = '';
-        updateInstructorStatus();
-        runComparison();
+        document.getElementById('loginBtnText').innerText = "Connected";
+        document.getElementById('outlookStatus').innerHTML = `<span class="text-emerald-600">✓ Logged in as ${loginResponse.account.username}</span>`;
+
+        await fetchOutlookSharedCalendars(loginResponse.accessToken);
       } catch (err) {
-        console.error("URL fetch error:", err);
-        alert(`Failed to load calendar link directly due to CORS or network rules.\n\nTip: You can download the .ics file from the link and upload it via the file input below instead.`);
+        console.error("Microsoft Login Error:", err);
+        alert("Authentication failed: " + err.message);
       }
     }
 
-    // --- ICS PARSER FOR FILES ---
-    async function handleICSUpload(e) {
-      const files = e.target.files;
-      if (!files.length) return;
+    async function fetchOutlookSharedCalendars(accessToken) {
+      document.getElementById('outlookStatus').innerText = "Fetching shared calendars...";
 
-      for (let file of files) {
-        const text = await file.text();
-        const instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
-        instructorsData[instructorName] = parseICS(text);
+      // 1. Get all calendars accessible to the user (including shared ones)
+      const res = await fetch("https://graph.microsoft.com/v1.0/me/calendars?$top=50", {
+        headers: { Authorization: `Bearer ${accessToken}` }
+      });
+      const data = await res.json();
+
+      if (!data.value) return;
+
+      instructorsData = {};
+      const calendarListDiv = document.getElementById('calendarList');
+      calendarListDiv.innerHTML = '';
+
+      // Determine time window (e.g., current month)
+      const startRange = new Date();
+      startRange.setDate(startRange.getDate() - 7);
+      const endRange = new Date();
+      endRange.setDate(endRange.getDate() + 30);
+
+      // 2. Fetch events for each calendar
+      for (let cal of data.value) {
+        const calName = cal.name || cal.owner.name;
+        
+        // Fetch event view for this specific calendar
+        const eventRes = await fetch(
+          `https://graph.microsoft.com/v1.0/me/calendars/${cal.id}/calendarView?startDateTime=${startRange.toISOString()}&endDateTime=${endRange.toISOString()}&$select=start,end,subject`, 
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        const eventData = await eventRes.json();
+
+        if (eventData.value) {
+          instructorsData[calName] = eventData.value.map(e => ({
+            start: new Date(e.start.dateTime + 'Z'),
+            end: new Date(e.end.dateTime + 'Z'),
+            summary: e.subject
+          }));
+
+          calendarListDiv.innerHTML += `<div>• ${calName} (${eventData.value.length} shifts)</div>`;
+        }
       }
-      
-      updateInstructorStatus();
+
+      document.getElementById('outlookStatus').innerHTML = `<span class="text-emerald-600">✓ Loaded ${Object.keys(instructorsData).length} Outlook calendar(s)</span>`;
       runComparison();
     }
 
-    function updateInstructorStatus() {
-      const count = Object.keys(instructorsData).length;
-      document.getElementById('instructorStats').innerHTML = 
-        `<span class="text-emerald-600">✓ Loaded ${count} instructor calendar(s)</span>`;
-    }
-
-    function parseICS(icsText) {
-      const events = [];
-      const lines = icsText.split(/\r\n|\n|\r/);
-      let currentEvent = null;
-
-      for (let line of lines) {
-        if (line.startsWith('BEGIN:VEVENT')) {
-          currentEvent = {};
-        } else if (line.startsWith('END:VEVENT')) {
-          if (currentEvent && currentEvent.start && currentEvent.end) {
-            events.push(currentEvent);
-          }
-          currentEvent = null;
-        } else if (currentEvent) {
-          if (line.startsWith('DTSTART')) {
-            currentEvent.start = parseICSTime(line.split(':')[1]);
-          } else if (line.startsWith('DTEND')) {
-            currentEvent.end = parseICSTime(line.split(':')[1]);
-          } else if (line.startsWith('SUMMARY')) {
-            currentEvent.summary = line.split(':')[1] || 'Available';
-          }
-        }
-      }
-      return events;
-    }
-
-    function parseICSTime(str) {
-      if (!str) return null;
-      const clean = str.trim().replace(/Z$/, '');
-      if (clean.length < 8) return null;
-      
-      const yr = clean.substring(0, 4);
-      const mo = clean.substring(4, 6) - 1;
-      const da = clean.substring(6, 8);
-      
-      let hr = 0, mi = 0, se = 0;
-      if (clean.includes('T')) {
-        const timePart = clean.split('T')[1];
-        hr = timePart.substring(0, 2) || 0;
-        mi = timePart.substring(2, 4) || 0;
-        se = timePart.substring(4, 6) || 0;
-      }
-      return new Date(Date.UTC(yr, mo, da, hr, mi, se));
-    }
-
-    // --- CSV PARSER (SHAREPOINT) ---
+    // --- CSV PARSING & COMPARISON ---
     async function handleCSVUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
 
       const text = await file.text();
-      studentSlots = parseCSV(text);
-      
-      document.getElementById('studentStats').innerHTML = 
-        `<span class="text-emerald-600">✓ Loaded ${studentSlots.length} student availability slot(s)</span>`;
-      
-      runComparison();
-    }
-
-    function parseCSV(csvText) {
-      const cleanText = csvText.replace(/^\uFEFF/, '').trim();
-      const lines = cleanText.split(/\r?\n/).filter(line => line.trim() !== '');
-      
-      if (lines.length < 2) return [];
-
-      const delimiter = lines[0].includes(';') ? ';' : ',';
-      const slots = [];
-
-      function parseFlexibleDate(dateStr) {
-        if (!dateStr) return null;
-        let d = new Date(dateStr);
-        if (!isNaN(d.getTime())) return d;
-
-        const cleanedStr = dateStr.replace(',', '');
-        d = new Date(cleanedStr);
-        if (!isNaN(d.getTime())) return d;
-
-        return null;
-      }
+      const cleanText = text.replace(/^\uFEFF/, '').trim();
+      const lines = cleanText.split(/\r?\n/);
+      studentSlots = [];
 
       for (let i = 1; i < lines.length; i++) {
-        const row = lines[i].split(new RegExp(`${delimiter}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`))
-                            .map(r => r.trim().replace(/^"|"$/g, ''));
-
+        const row = lines[i].split(',').map(r => r.trim().replace(/^"|"$/g, ''));
         if (row.length < 3) continue;
-
-        const student = row[0] || `Student #${i}`;
-        const start = parseFlexibleDate(row[1]);
-        const end = parseFlexibleDate(row[2]);
-
-        if (start && end) {
-          slots.push({ student, start, end });
+        const start = new Date(row[1]);
+        const end = new Date(row[2]);
+        if (!isNaN(start) && !isNaN(end)) {
+          studentSlots.push({ student: row[0], start, end });
         }
       }
 
-      return slots;
+      document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Loaded ${studentSlots.length} student slots</span>`;
+      runComparison();
     }
 
-    // --- COMPARISON LOGIC (INVERTED: BUSY = AVAILABLE) ---
     function runComparison() {
       renderTable();
     }
 
     function renderTable() {
       const tbody = document.getElementById('resultsTable');
-      const search = document.getElementById('searchInput').value.toLowerCase();
       tbody.innerHTML = '';
 
-      if (studentSlots.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">Please load a student availability CSV.</td></tr>`;
-        return;
-      }
+      if (!studentSlots.length || !Object.keys(instructorsData).length) return;
 
       const instructorNames = Object.keys(instructorsData);
-      if (instructorNames.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">Please add instructor calendar links or upload .ics files.</td></tr>`;
-        return;
-      }
 
       studentSlots.forEach(slot => {
-        if (search && !slot.student.toLowerCase().includes(search)) return;
-
         const available = [];
         const unavailable = [];
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
-          // INVERTED MATCHING: Overlapping event block means the instructor IS AVAILABLE
           const activeShift = events.find(ev => ev.start < slot.end && ev.end > slot.start);
           
           if (activeShift) {
@@ -306,60 +213,17 @@
         });
 
         const tr = document.createElement('tr');
-        tr.className = 'hover:bg-slate-50 transition';
-        
         const formatOptions = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' };
         const timeStr = `${slot.start.toLocaleDateString([], formatOptions)} – ${slot.end.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
 
         tr.innerHTML = `
-          <td class="p-4 font-semibold text-slate-800">${slot.student}</td>
-          <td class="p-4 text-slate-600 whitespace-nowrap">${timeStr}</td>
-          <td class="p-4">
-            <div class="flex flex-wrap gap-1.5">
-              ${available.length > 0 
-                ? available.map(a => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium" title="Shift: ${a.title}">${a.name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">No instructors available</span>'}
-            </div>
-          </td>
-          <td class="p-4">
-            <div class="flex flex-wrap gap-1.5">
-              ${unavailable.length > 0 
-                ? unavailable.map(name => `<span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full border border-slate-200">${name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">All instructors available</span>'}
-            </div>
-          </td>
+          <td class="p-4 font-semibold">${slot.student}</td>
+          <td class="p-4 whitespace-nowrap">${timeStr}</td>
+          <td class="p-4">${available.map(a => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full mr-1">${a.name}</span>`).join('') || '<span class="text-xs text-slate-400">None</span>'}</td>
+          <td class="p-4">${unavailable.map(name => `<span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full mr-1">${name}</span>`).join('') || '<span class="text-xs text-slate-400">None</span>'}</td>
         `;
         tbody.appendChild(tr);
       });
-    }
-
-    // --- DEMO DATA GENERATOR ---
-    function loadDemoData() {
-      const now = new Date();
-      const todayAt10 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 10, 0);
-      const todayAt11 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 11, 0);
-      const todayAt14 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0);
-      const todayAt15 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 0);
-
-      instructorsData = {};
-      for (let i = 1; i <= 16; i++) {
-        const name = `Instructor ${i}`;
-        if (i % 2 === 0) {
-          instructorsData[name] = [{ start: todayAt10, end: todayAt11, summary: 'Available Hours' }];
-        } else {
-          instructorsData[name] = [{ start: todayAt14, end: todayAt15, summary: 'Tutoring Shift' }];
-        }
-      }
-
-      studentSlots = [
-        { student: 'Alex Smith', start: todayAt10, end: todayAt11 },
-        { student: 'Jordan Lee', start: todayAt14, end: todayAt15 },
-        { student: 'Morgan Taylor', start: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 16, 0), end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 17, 0) }
-      ];
-
-      updateInstructorStatus();
-      document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Loaded 3 demo student slots</span>`;
-      runComparison();
     }
   </script>
 </body>
