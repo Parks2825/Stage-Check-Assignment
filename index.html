@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Automated Singular Stage Checker & Slot Assignment Engine</p>
+        <p class="text-indigo-200 text-sm">Automated Singular Assignment Engine (Strict 1-to-1 Time Slot Allocation)</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -32,7 +32,7 @@
             📊 1. Load Student Availability (CSV)
           </h2>
           <p class="text-xs text-slate-500 mb-4">
-            Upload <code>Stage Check List (2).csv</code> first. Filters for <strong>Pending</strong> requests automatically.
+            Upload <code>Stage Check List (2).csv</code>. Filters for <strong>Pending</strong> requests automatically.
           </p>
         </div>
         <div>
@@ -72,8 +72,8 @@
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 class="text-xl font-bold text-slate-800">3. Final Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Each student is assigned a single optimal Stage Checker and target slot.</p>
+          <h2 class="text-xl font-bold text-slate-800">3. Optimized Single Stage Checker Assignments</h2>
+          <p class="text-xs text-slate-500">Each student is assigned a unique, non-overlapping stage check time slot.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -92,7 +92,7 @@
           <tbody id="resultsTable" class="divide-y divide-slate-100">
             <tr>
               <td colspan="5" class="p-8 text-center text-slate-400">
-                Please load the CSV file first, then add instructor calendars to compute singular assignments.
+                Please load the CSV file first, then add instructor calendars to calculate assignments.
               </td>
             </tr>
           </tbody>
@@ -268,7 +268,7 @@
       return new Date(Date.UTC(yr, mo, da, hr, mi, se));
     }
 
-    // --- SINGULAR SELECTION & RENDERING ENGINE ---
+    // --- NON-OVERLAPPING SINGULAR SELECTION ENGINE ---
     function runComparison() {
       renderTable();
     }
@@ -284,15 +284,20 @@
       }
 
       const instructorNames = Object.keys(instructorsData);
+      
+      // Registry to track claimed slots: key = "InstructorName_ISOStartTime"
+      const occupiedSlots = new Set();
 
       studentSlots.forEach(slot => {
         const fullSearchText = `${slot.student} ${slot.availability} ${slot.comments}`.toLowerCase();
         if (search && !fullSearchText.includes(search)) return;
 
         let assignedChecker = "Unassigned";
-        let assignedTime = "No matching open blocks found";
+        let assignedTime = "No unique open block found";
         let matchReason = "Requires manual scheduling coordination";
         let highestScore = -1;
+        let chosenSlotKey = null;
+        let chosenBlockTime = null;
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
@@ -304,7 +309,7 @@
           const nameClean = instName.toLowerCase();
           const instLastName = nameClean.split(' ').pop();
           
-          // Strict Exclusions
+          // Strict Exclusion Check
           if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${instLastName}`)) {
             return; 
           }
@@ -318,9 +323,12 @@
             temporaryReason = "Explicitly requested by student notes";
           }
 
+          // Filter for valid open shifts that are NOT already claimed by another student
           const openBlocks = events.filter(ev => {
             const sum = (ev.summary || '').toLowerCase();
-            return sum === '' || sum === 'available' || sum === 'open' || sum === 'shift';
+            const isOpen = (sum === '' || sum === 'available' || sum === 'open' || sum === 'shift');
+            const slotKey = `${instName}_${ev.start.toISOString()}`;
+            return isOpen && !occupiedSlots.has(slotKey);
           });
 
           if (openBlocks.length > 0) {
@@ -340,13 +348,22 @@
               assignedChecker = instName;
               matchReason = temporaryReason;
 
+              // Select the first unclaimed block for this instructor
               const bestBlock = openBlocks[0];
+              chosenSlotKey = `${instName}_${bestBlock.start.toISOString()}`;
+              
               const startStr = bestBlock.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
               const timeStr = bestBlock.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              assignedTime = `${startStr} @ ${timeStr}`;
+              chosenBlockTime = `${startStr} @ ${timeStr}`;
             }
           }
         });
+
+        // Register the slot as occupied so future students cannot take it
+        if (chosenSlotKey) {
+          occupiedSlots.add(chosenSlotKey);
+          assignedTime = chosenBlockTime;
+        }
 
         const badgeClass = assignedChecker !== "Unassigned" 
           ? "bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold text-xs px-2.5 py-1 rounded-full border"
@@ -391,8 +408,13 @@
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
       instructorsData = {
-        "Blaine Oliver": [{ start: new Date(), end: new Date(Date.now() + 7200000), summary: "Available" }],
-        "Jisoo Kim": [{ start: new Date(), end: new Date(Date.now() + 7200000), summary: "Available" }]
+        "Blaine Oliver": [
+          { start: new Date(2026, 7, 7, 9, 0), end: new Date(2026, 7, 7, 11, 0), summary: "Available" },
+          { start: new Date(2026, 7, 8, 14, 0), end: new Date(2026, 7, 8, 16, 0), summary: "Available" }
+        ],
+        "Jisoo Kim": [
+          { start: new Date(2026, 7, 7, 9, 0), end: new Date(2026, 7, 7, 11, 0), summary: "Available" }
+        ]
       };
       updateInstructorStatus();
       
