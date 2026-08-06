@@ -13,7 +13,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Mode: Only processing student slots where Status = "Pending"</p>
+        <p class="text-indigo-200 text-sm">Mode: Filtering student slots where "Availability", "Comments", or "Status" equals "Pending"</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -63,7 +63,7 @@
           📊 2. Import Student Availability (CSV)
         </h2>
         <p class="text-xs text-slate-500 mb-4">
-          Upload CSV with columns: <code>Student, Start, End, Status</code>. Only <strong>Pending</strong> rows will be processed.
+          Upload CSV with columns: <code>Student, Start, End</code> and <code>Availability / Comments / Status</code>. Only <strong>Pending</strong> rows will be assigned.
         </p>
         <input type="file" id="csvInput" accept=".csv" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-emerald-50 file:text-emerald-700 hover:file:bg-emerald-100 cursor-pointer"/>
         <div id="studentStats" class="mt-4 text-xs font-semibold text-slate-600">No student file loaded.</div>
@@ -219,7 +219,7 @@
       return new Date(Date.UTC(yr, mo, da, hr, mi, se));
     }
 
-    // --- CSV PARSER (SHAREPOINT) WITH STATUS FILTERING ---
+    // --- CSV PARSER (Targeting Availability, Comments, Status columns) ---
     async function handleCSVUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -242,10 +242,13 @@
       const headers = lines[0].split(new RegExp(`${delimiter}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`))
                               .map(h => h.trim().replace(/^"|"$/g, '').toLowerCase());
 
-      const studentIdx = headers.findIndex(h => h.includes('student'));
-      const startIdx = headers.findIndex(h => h.includes('start'));
-      const endIdx = headers.findIndex(h => h.includes('end'));
-      const statusIdx = headers.findIndex(h => h.includes('status'));
+      // Locate column indices flexible to typos (e.g., "Avialabilty")
+      const studentIdx = headers.findIndex(h => h.includes('student') || h.includes('name'));
+      const startIdx   = headers.findIndex(h => h.includes('start'));
+      const endIdx     = headers.findIndex(h => h.includes('end'));
+      const availIdx   = headers.findIndex(h => h.includes('avail') || h.includes('avial'));
+      const commentIdx = headers.findIndex(h => h.includes('comment'));
+      const statusIdx  = headers.findIndex(h => h.includes('status'));
 
       const slots = [];
 
@@ -267,19 +270,26 @@
 
         if (row.length < 3) continue;
 
-        const student = (studentIdx !== -1 ? row[studentIdx] : row[0]) || `Student #${i}`;
+        const student  = (studentIdx !== -1 ? row[studentIdx] : row[0]) || `Student #${i}`;
         const startStr = startIdx !== -1 ? row[startIdx] : row[1];
-        const endStr = endIdx !== -1 ? row[endIdx] : row[2];
-        const statusVal = (statusIdx !== -1 ? row[statusIdx] : row[3] || 'Pending').trim();
+        const endStr   = endIdx !== -1 ? row[endIdx] : row[2];
 
-        // ONLY assign if status is "pending" (case-insensitive)
-        if (statusVal.toLowerCase() !== 'pending') continue;
+        // Gather text from Availability, Comments, and Status columns
+        const availVal   = availIdx !== -1 ? row[availIdx] : '';
+        const commentVal = commentIdx !== -1 ? row[commentIdx] : '';
+        const statusVal  = statusIdx !== -1 ? row[statusIdx] : '';
+
+        // Concatenate all target fields to search for "pending"
+        const combinedStatusText = `${availVal} ${commentVal} ${statusVal}`.toLowerCase();
+
+        // ONLY assign if "pending" is found in Availability, Comments, or Status
+        if (!combinedStatusText.includes('pending')) continue;
 
         const start = parseFlexibleDate(startStr);
-        const end = parseFlexibleDate(endStr);
+        const end   = parseFlexibleDate(endStr);
 
         if (start && end) {
-          slots.push({ student, start, end, status: statusVal });
+          slots.push({ student, start, end, status: 'Pending' });
         }
       }
 
@@ -378,7 +388,6 @@
         ]
       };
 
-      // Simulates CSV output containing both Pending and Approved slots
       studentSlots = [
         { student: 'Alex Smith', start: todayAt10, end: todayAt11, status: 'Pending' },
         { student: 'Jordan Lee', start: todayAt14, end: todayAt15, status: 'Pending' }
