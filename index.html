@@ -13,7 +13,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Compare 16+ instructor calendars (.ics) against SharePoint student availability</p>
+        <p class="text-indigo-200 text-sm">Compare instructor ICS calendars (URL or File) against SharePoint student slots</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -23,25 +23,44 @@
 
   <main class="max-w-7xl mx-auto px-4 py-8 space-y-8">
 
-    <!-- FILE IMPORT SECTION -->
+    <!-- FILE & LINK IMPORT SECTION -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       
-      <!-- Instructor Calendars -->
-      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-        <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-          📅 1. Import Instructor Calendars
+      <!-- Instructor Calendars (URL + ICS File Upload) -->
+      <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 space-y-4">
+        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+          📅 1. Import Instructor Calendars (.ics)
         </h2>
-        <p class="text-xs text-slate-500 mb-4">
-          Select multiple <code>.ics</code> files at once (hold Ctrl/Cmd for 16+ files).
-        </p>
-        <input type="file" id="icsInput" multiple accept=".ics" class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
-        <div id="instructorStats" class="mt-4 text-xs font-semibold text-slate-600">No calendars loaded.</div>
+        
+        <!-- URL Input -->
+        <div>
+          <label class="block text-xs font-semibold text-slate-600 mb-1">Paste Published .ics Calendar Link (URL)</label>
+          <div class="flex gap-2">
+            <input type="url" id="icsUrlInput" placeholder="https://example.com/calendar.ics" class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            <button onclick="handleURLAdd()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-md transition whitespace-nowrap">
+              Add Link
+            </button>
+          </div>
+        </div>
+
+        <div class="relative flex py-1 items-center">
+          <div class="flex-grow border-t border-slate-200"></div>
+          <span class="flex-shrink mx-2 text-xs text-slate-400 font-medium">OR upload .ics files directly</span>
+          <div class="flex-grow border-t border-slate-200"></div>
+        </div>
+
+        <!-- File Input -->
+        <div>
+          <input type="file" id="icsInput" multiple accept=".ics" class="block w-full text-sm text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
+        </div>
+
+        <div id="instructorStats" class="text-xs font-semibold text-slate-600 pt-1">No calendars loaded.</div>
       </div>
 
       <!-- SharePoint CSV Import -->
       <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
         <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-          📊 2. Import SharePoint File (CSV)
+          📊 2. Import Student Availability (CSV)
         </h2>
         <p class="text-xs text-slate-500 mb-4">
           Upload CSV with columns: <code>Student, Start, End</code> (or exported SharePoint list).
@@ -57,7 +76,7 @@
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Availability Analysis</h2>
-          <p class="text-xs text-slate-500">Shows which instructors are free during student availability windows</p>
+          <p class="text-xs text-slate-500">Instructors are marked <strong>Available</strong> if they have an active duty block during the requested slot.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student or instructor..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -68,14 +87,14 @@
             <tr class="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200">
               <th class="p-4">Student</th>
               <th class="p-4">Requested Window</th>
-              <th class="p-4">Available Instructors</th>
-              <th class="p-4">Unavailable Instructors</th>
+              <th class="p-4">Available Instructors (On Duty)</th>
+              <th class="p-4">Unavailable Instructors (Off Duty)</th>
             </tr>
           </thead>
           <tbody id="resultsTable" class="divide-y divide-slate-100">
             <tr>
               <td colspan="4" class="p-8 text-center text-slate-400">
-                Upload instructor calendars and a SharePoint CSV file above to view results.
+                Load instructor ICS calendars and a student availability CSV file above to view results.
               </td>
             </tr>
           </tbody>
@@ -92,22 +111,67 @@
     document.getElementById('icsInput').addEventListener('change', handleICSUpload);
     document.getElementById('csvInput').addEventListener('change', handleCSVUpload);
 
-    // --- ICS PARSER ---
+    // --- FETCH ICS FROM URL ---
+    async function handleURLAdd() {
+      const urlInput = document.getElementById('icsUrlInput');
+      let url = urlInput.value.trim();
+
+      if (!url) {
+        alert("Please enter a valid .ics calendar URL.");
+        return;
+      }
+
+      if (!/^https?:\/\//i.test(url)) {
+        url = 'https://' + url;
+      }
+
+      const urlParts = url.split('/');
+      let instructorName = urlParts[urlParts.length - 1].replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, " ");
+      if (!instructorName || instructorName.length < 3) {
+        instructorName = `Instructor (${Object.keys(instructorsData).length + 1})`;
+      }
+
+      try {
+        // Use a CORS proxy to allow fetching external ICS files directly in browser
+        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        let response = await fetch(proxyUrl);
+        
+        if (!response.ok) {
+          // Fallback to direct fetch if proxy fails
+          response = await fetch(url);
+        }
+
+        const text = await response.text();
+        instructorsData[instructorName] = parseICS(text);
+        
+        urlInput.value = '';
+        updateInstructorStatus();
+        runComparison();
+      } catch (err) {
+        console.error("URL fetch error:", err);
+        alert(`Failed to load calendar link directly due to network/CORS restrictions.\n\nPlease download the .ics file and upload it using the file uploader below.`);
+      }
+    }
+
+    // --- ICS FILE PARSER ---
     async function handleICSUpload(e) {
       const files = e.target.files;
       if (!files.length) return;
 
-      instructorsData = {};
       for (let file of files) {
         const text = await file.text();
         const instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
         instructorsData[instructorName] = parseICS(text);
       }
       
-      document.getElementById('instructorStats').innerHTML = 
-        `<span class="text-emerald-600">✓ Loaded ${Object.keys(instructorsData).length} instructor calendar(s)</span>`;
-      
+      updateInstructorStatus();
       runComparison();
+    }
+
+    function updateInstructorStatus() {
+      const count = Object.keys(instructorsData).length;
+      document.getElementById('instructorStats').innerHTML = 
+        `<span class="text-emerald-600">✓ Loaded ${count} instructor calendar(s)</span>`;
     }
 
     function parseICS(icsText) {
@@ -129,7 +193,7 @@
           } else if (line.startsWith('DTEND')) {
             currentEvent.end = parseICSTime(line.split(':')[1]);
           } else if (line.startsWith('SUMMARY')) {
-            currentEvent.summary = line.split(':')[1] || 'Busy';
+            currentEvent.summary = line.split(':')[1] || 'Available';
           }
         }
       }
@@ -155,7 +219,7 @@
       return new Date(Date.UTC(yr, mo, da, hr, mi, se));
     }
 
-    // --- CSV PARSER (SHAREPOINT ENHANCED) ---
+    // --- CSV PARSER (SHAREPOINT) ---
     async function handleCSVUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -164,30 +228,24 @@
       studentSlots = parseCSV(text);
       
       document.getElementById('studentStats').innerHTML = 
-        `<span class="text-emerald-600">✓ Loaded ${studentSlots.length} student availability slot(s)</span>`;
+        `<span class="text-emerald-600">✓ Loaded ${studentSlots.length} student slot(s)</span>`;
       
       runComparison();
     }
 
     function parseCSV(csvText) {
-      // 1. Remove UTF-8 Byte Order Mark (BOM) if present
       const cleanText = csvText.replace(/^\uFEFF/, '').trim();
       const lines = cleanText.split(/\r?\n/).filter(line => line.trim() !== '');
-      
       if (lines.length < 2) return [];
 
-      // 2. Auto-detect delimiter (comma vs. semicolon)
       const delimiter = lines[0].includes(';') ? ';' : ',';
       const slots = [];
 
-      // Helper function to robustly parse various SharePoint date strings
       function parseFlexibleDate(dateStr) {
         if (!dateStr) return null;
         let d = new Date(dateStr);
-        
         if (!isNaN(d.getTime())) return d;
 
-        // Handle US SharePoint format: "MM/DD/YYYY, HH:MM:SS AM/PM" or "MM/DD/YYYY HH:MM AM"
         const cleanedStr = dateStr.replace(',', '');
         d = new Date(cleanedStr);
         if (!isNaN(d.getTime())) return d;
@@ -195,9 +253,7 @@
         return null;
       }
 
-      // 3. Process CSV Rows (skipping header row)
       for (let i = 1; i < lines.length; i++) {
-        // Regex splits by delimiter while respecting quoted values
         const row = lines[i].split(new RegExp(`${delimiter}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`))
                             .map(r => r.trim().replace(/^"|"$/g, ''));
 
@@ -209,15 +265,13 @@
 
         if (start && end) {
           slots.push({ student, start, end });
-        } else {
-          console.warn(`Row ${i} skipped - Invalid date format:`, { startStr: row[1], endStr: row[2] });
         }
       }
 
       return slots;
     }
 
-    // --- COMPARISON LOGIC ---
+    // --- COMPARISON LOGIC (BUSY = AVAILABLE) ---
     function runComparison() {
       renderTable();
     }
@@ -234,7 +288,7 @@
 
       const instructorNames = Object.keys(instructorsData);
       if (instructorNames.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">Please upload instructor .ics files.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="4" class="p-8 text-center text-slate-400">Please add instructor calendar links or upload .ics files.</td></tr>`;
         return;
       }
 
@@ -246,12 +300,13 @@
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
-          const conflict = events.find(ev => ev.start < slot.end && ev.end > slot.start);
+          // Overlapping event block means the instructor IS AVAILABLE
+          const activeShift = events.find(ev => ev.start < slot.end && ev.end > slot.start);
           
-          if (conflict) {
-            unavailable.push({ name: instName, reason: conflict.summary || 'Busy' });
+          if (activeShift) {
+            available.push({ name: instName, title: activeShift.summary || 'On Duty' });
           } else {
-            available.push(instName);
+            unavailable.push(instName);
           }
         });
 
@@ -267,15 +322,15 @@
           <td class="p-4">
             <div class="flex flex-wrap gap-1.5">
               ${available.length > 0 
-                ? available.map(name => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium">${name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">None free</span>'}
+                ? available.map(a => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium" title="Shift: ${a.title}">${a.name}</span>`).join('') 
+                : '<span class="text-xs text-slate-400 italic">No instructors available</span>'}
             </div>
           </td>
           <td class="p-4">
             <div class="flex flex-wrap gap-1.5">
               ${unavailable.length > 0 
-                ? unavailable.map(u => `<span class="bg-rose-50 text-rose-700 text-xs px-2.5 py-1 rounded-full border border-rose-200" title="Conflict: ${u.reason}">${u.name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">All free</span>'}
+                ? unavailable.map(name => `<span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full border border-slate-200">${name}</span>`).join('') 
+                : '<span class="text-xs text-slate-400 italic">All instructors available</span>'}
             </div>
           </td>
         `;
@@ -292,12 +347,12 @@
       const todayAt15 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 0);
 
       instructorsData = {};
-      for (let i = 1; i <= 16; i++) {
+      for (let i = 1; i <= 6; i++) {
         const name = `Instructor ${i}`;
         if (i % 2 === 0) {
-          instructorsData[name] = [{ start: todayAt10, end: todayAt11, summary: 'Department Meeting' }];
+          instructorsData[name] = [{ start: todayAt10, end: todayAt11, summary: 'Available Hours' }];
         } else {
-          instructorsData[name] = [{ start: todayAt14, end: todayAt15, summary: 'Lecture Block' }];
+          instructorsData[name] = [{ start: todayAt14, end: todayAt15, summary: 'Tutoring Shift' }];
         }
       }
 
@@ -307,7 +362,7 @@
         { student: 'Morgan Taylor', start: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 16, 0), end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 17, 0) }
       ];
 
-      document.getElementById('instructorStats').innerHTML = `<span class="text-emerald-600">✓ Loaded 16 demo instructors</span>`;
+      updateInstructorStatus();
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Loaded 3 demo student slots</span>`;
       runComparison();
     }
