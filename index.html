@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Automated Singular Assignment Engine (Strict 1-to-1 Time Slot Allocation)</p>
+        <p class="text-indigo-200 text-sm">Automated Singular Assignment Engine (Strict 1-to-1 Future Allocation)</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -73,7 +73,7 @@
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Optimized Single Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Each student is assigned a unique, non-overlapping stage check time slot.</p>
+          <p class="text-xs text-slate-500">Each student is assigned a unique, upcoming stage check time slot. Past blocks are excluded.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -268,7 +268,7 @@
       return new Date(Date.UTC(yr, mo, da, hr, mi, se));
     }
 
-    // --- NON-OVERLAPPING SINGULAR SELECTION ENGINE ---
+    // --- FUTURE-ONLY NON-OVERLAPPING SINGULAR SELECTION ENGINE ---
     function runComparison() {
       renderTable();
     }
@@ -284,6 +284,7 @@
       }
 
       const instructorNames = Object.keys(instructorsData);
+      const now = new Date(); // Current timestamp line in the sand
       
       // Registry to track claimed slots: key = "InstructorName_ISOStartTime"
       const occupiedSlots = new Set();
@@ -293,7 +294,7 @@
         if (search && !fullSearchText.includes(search)) return;
 
         let assignedChecker = "Unassigned";
-        let assignedTime = "No unique open block found";
+        let assignedTime = "No unique upcoming block found";
         let matchReason = "Requires manual scheduling coordination";
         let highestScore = -1;
         let chosenSlotKey = null;
@@ -315,7 +316,7 @@
           }
 
           let currentScore = 50; 
-          let temporaryReason = "Active schedule availability detected";
+          let temporaryReason = "Active upcoming availability detected";
 
           // Explicit Requested Name Match
           if (comment.includes(nameClean) || comment.includes(instLastName)) {
@@ -323,12 +324,13 @@
             temporaryReason = "Explicitly requested by student notes";
           }
 
-          // Filter for valid open shifts that are NOT already claimed by another student
+          // Filter for valid open shifts that are both UNCLAIMED and in the FUTURE
           const openBlocks = events.filter(ev => {
             const sum = (ev.summary || '').toLowerCase();
             const isOpen = (sum === '' || sum === 'available' || sum === 'open' || sum === 'shift');
+            const isFuture = ev.start > now; // Discards historical availability
             const slotKey = `${instName}_${ev.start.toISOString()}`;
-            return isOpen && !occupiedSlots.has(slotKey);
+            return isOpen && isFuture && !occupiedSlots.has(slotKey);
           });
 
           if (openBlocks.length > 0) {
@@ -348,7 +350,7 @@
               assignedChecker = instName;
               matchReason = temporaryReason;
 
-              // Select the first unclaimed block for this instructor
+              // Select the first upcoming unclaimed block for this instructor
               const bestBlock = openBlocks[0];
               chosenSlotKey = `${instName}_${bestBlock.start.toISOString()}`;
               
@@ -359,7 +361,7 @@
           }
         });
 
-        // Register the slot as occupied so future students cannot take it
+        // Register the slot as occupied so future rows cannot double book it
         if (chosenSlotKey) {
           occupiedSlots.add(chosenSlotKey);
           assignedTime = chosenBlockTime;
@@ -399,6 +401,7 @@
       });
     }
 
+    // Generates test elements pointing precisely into the future relative to execution
     function loadDemoData() {
       studentSlots = [
         { student: 'Easton Jettie', availability: 'Weekdays, Weekends', comments: 'Not with Jisoo, otherwise available 8/3-8/5:1430-2000, 8/6:0600-1300' },
@@ -407,13 +410,16 @@
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
+      const standardFutureOffset = 24 * 60 * 60 * 1000; // +1 day out
+      
       instructorsData = {
         "Blaine Oliver": [
-          { start: new Date(2026, 7, 7, 9, 0), end: new Date(2026, 7, 7, 11, 0), summary: "Available" },
-          { start: new Date(2026, 7, 8, 14, 0), end: new Date(2026, 7, 8, 16, 0), summary: "Available" }
+          { start: new Date(Date.now() - standardFutureOffset), end: new Date(Date.now() - standardFutureOffset + 7200000), summary: "Available" }, // EXCLUDED: Past
+          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Available" }, // INCLUDED: Future
+          { start: new Date(Date.now() + (standardFutureOffset * 2)), end: new Date(Date.now() + (standardFutureOffset * 2) + 7200000), summary: "Available" }
         ],
         "Jisoo Kim": [
-          { start: new Date(2026, 7, 7, 9, 0), end: new Date(2026, 7, 7, 11, 0), summary: "Available" }
+          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Available" }
         ]
       };
       updateInstructorStatus();
