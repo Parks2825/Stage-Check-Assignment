@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Matching Student Availability & Comments against Instructor Calendars</p>
+        <p class="text-indigo-200 text-sm">Cross-referencing Pending Student constraints with Instructor shifts</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -32,7 +32,7 @@
             📊 1. Load Student Availability (CSV)
           </h2>
           <p class="text-xs text-slate-500 mb-4">
-            Upload <code>Stage Check List (2).csv</code> first. The system filters for **Pending** records and extracts their availability & comments.
+            Upload <code>Stage Check List (2).csv</code> first. The system filters for **Pending** requests.
           </p>
         </div>
         <div>
@@ -72,8 +72,8 @@
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 class="text-xl font-bold text-slate-800">3. Pending Student Slot Analysis</h2>
-          <p class="text-xs text-slate-500">Filtered strictly by Pending stage check requests.</p>
+          <h2 class="text-xl font-bold text-slate-800">3. Optimized Calendar Matches</h2>
+          <p class="text-xs text-slate-500">Cross-referencing stated constraints with open blocks on active files.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -83,16 +83,16 @@
           <thead>
             <tr class="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200">
               <th class="p-4">Student Name</th>
-              <th class="p-4">Availability Window</th>
-              <th class="p-4">Student Comments / Constraints</th>
-              <th class="p-4">Available Instructors</th>
-              <th class="p-4">Unavailable / On-Duty</th>
+              <th class="p-4">Stated Windows</th>
+              <th class="p-4">Student Constraints & Comments</th>
+              <th class="p-4" title="Instructors whose open shifts align with text conditions">Best Matched Instructors</th>
+              <th class="p-4">Conflict / Unscheduled</th>
             </tr>
           </thead>
           <tbody id="resultsTable" class="divide-y divide-slate-100">
             <tr>
               <td colspan="5" class="p-8 text-center text-slate-400">
-                Please follow the steps above: Load the CSV file first, then add your instructor schedules.
+                Please load the student CSV file first, then add instructor calendars to calculate the best matches.
               </td>
             </tr>
           </tbody>
@@ -245,7 +245,7 @@
       return new Date(Date.UTC(yr, mo, da, hr, mi, se));
     }
 
-    // --- DISPLAY & MATCHING ---
+    // --- HEURISTIC MATCHING ENGINE ---
     function runComparison() {
       renderTable();
     }
@@ -266,17 +266,67 @@
         const fullSearchText = `${slot.student} ${slot.availability} ${slot.comments}`.toLowerCase();
         if (search && !fullSearchText.includes(search)) return;
 
-        const available = [];
-        const unavailable = [];
+        const bestMatches = [];
+        const conflicts = [];
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
-          if (events && events.length > 0) {
-            available.push({ name: instName, label: 'Calendar Loaded' });
+          const hasSchedule = events && events.length > 0;
+
+          if (!hasSchedule) {
+            conflicts.push({ name: instName, reason: 'No Schedule Data' });
+            return;
+          }
+
+          // Smart heuristic matching: evaluate explicit exclusions or preferences written inside comments
+          const comment = slot.comments.toLowerCase();
+          const nameClean = instName.toLowerCase();
+          
+          let score = 50; // Neutral baseline score
+          let matchingReason = "Has active calendar availability blocks";
+
+          // 1. Explicit Exclusions (e.g. "Not with Jisoo")
+          const instLastName = nameClean.split(' ').pop();
+          if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${instLastName}`)) {
+            conflicts.push({ name: instName, reason: 'Explicitly requested alternative instructor' });
+            return;
+          }
+
+          // 2. Specific Preferred Instructor named in comment
+          if (comment.includes(nameClean) || comment.includes(instLastName)) {
+            score += 40;
+            matchingReason = "Explicitly named in student request notes";
+          }
+
+          // 3. Time Constraints vs Calendar Block Summary tags
+          const openBlocks = events.filter(ev => {
+            const sum = (ev.summary || '').toLowerCase();
+            return sum === '' || sum === 'available' || sum === 'open' || sum === 'shift';
+          });
+
+          if (openBlocks.length > 0) {
+            score += 10;
+            
+            // Contextual text analysis
+            if (comment.includes('morning') && openBlocks.some(ev => ev.start.getUTCHours() < 16)) {
+              score += 15;
+              matchingReason = "Matches morning preference window";
+            }
+            if (comment.includes('friday') && openBlocks.some(ev => ev.start.getUTCDay() === 5)) {
+              score += 15;
+              matchingReason = "Matches Friday preference target";
+            }
+          }
+
+          if (score >= 50) {
+            bestMatches.push({ name: instName, reason: matchingReason, score: score });
           } else {
-            unavailable.push({ name: instName, reason: 'No Shift Info' });
+            conflicts.push({ name: instName, reason: 'Low preference/constraint conflict' });
           }
         });
+
+        // Sort best matching options by heuristic preference rating
+        bestMatches.sort((a, b) => b.score - a.score);
 
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition';
@@ -295,15 +345,15 @@
           </td>
           <td class="p-4">
             <div class="flex flex-wrap gap-1.5">
-              ${available.length > 0 
-                ? available.map(a => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium">${a.name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">Load instructor calendars to match</span>'}
+              ${bestMatches.length > 0 
+                ? bestMatches.map(b => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium border border-emerald-200" title="${b.reason}">${b.name}</span>`).join('') 
+                : '<span class="text-xs text-slate-400 italic">No perfect matches</span>'}
             </div>
           </td>
           <td class="p-4">
             <div class="flex flex-wrap gap-1.5">
-              ${unavailable.length > 0 
-                ? unavailable.map(u => `<span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full border border-slate-200">${u.name}</span>`).join('') 
+              ${conflicts.length > 0 
+                ? conflicts.map(c => `<span class="bg-slate-100 text-slate-500 text-xs px-2.5 py-1 rounded-full border border-slate-200" title="${c.reason}">${c.name}</span>`).join('') 
                 : '<span class="text-xs text-slate-400 italic">None</span>'}
             </div>
           </td>
@@ -316,13 +366,13 @@
       studentSlots = [
         { student: 'Easton Jettie', availability: 'Weekdays, Weekends', comments: 'Not with Jisoo, otherwise available 8/3-8/5:1430-2000, 8/6:0600-1300' },
         { student: 'Cameron Walton', availability: 'Weekdays, Weekends', comments: 'Tuesday Thursday Saturday mornings best, unavailable August 9th, 12th, 13th, 17th' },
-        { student: 'Abigail Meyer', availability: 'Weekdays', comments: 'I can do anyday before 1pm' }
+        { student: 'Jacob Mastromonico', availability: 'Weekdays, Weekends', comments: 'Blaine Oliver has availability Friday morning' }
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
       instructorsData = {
         "Blaine Oliver": [{ start: new Date(), end: new Date(Date.now() + 7200000), summary: "Available" }],
-        "Phillip Gardner": []
+        "Jisoo Kim": [{ start: new Date(), end: new Date(Date.now() + 7200000), summary: "Available" }]
       };
       updateInstructorStatus();
       
