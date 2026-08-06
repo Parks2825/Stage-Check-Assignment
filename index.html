@@ -13,7 +13,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Compare instructor ICS calendars (URL or File) against SharePoint student slots</p>
+        <p class="text-indigo-200 text-sm">Mode: Instructors are available only if the calendar block is blank or says "available"</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -76,7 +76,7 @@
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Availability Analysis</h2>
-          <p class="text-xs text-slate-500">Instructors are marked <strong>Available</strong> if they have an active duty block during the requested slot.</p>
+          <p class="text-xs text-slate-500">Instructors are marked <strong>Available</strong> if they have an active block that is blank or titled "Available".</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student or instructor..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -87,8 +87,8 @@
             <tr class="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200">
               <th class="p-4">Student</th>
               <th class="p-4">Requested Window</th>
-              <th class="p-4">Available Instructors (On Duty)</th>
-              <th class="p-4">Unavailable Instructors (Off Duty)</th>
+              <th class="p-4">Available Instructors (Open Spots)</th>
+              <th class="p-4">Unavailable Instructors (Busy/Off Duty)</th>
             </tr>
           </thead>
           <tbody id="resultsTable" class="divide-y divide-slate-100">
@@ -132,12 +132,10 @@
       }
 
       try {
-        // Use a CORS proxy to allow fetching external ICS files directly in browser
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
         let response = await fetch(proxyUrl);
         
         if (!response.ok) {
-          // Fallback to direct fetch if proxy fails
           response = await fetch(url);
         }
 
@@ -181,7 +179,7 @@
 
       for (let line of lines) {
         if (line.startsWith('BEGIN:VEVENT')) {
-          currentEvent = {};
+          currentEvent = { summary: '' }; // Initialize with empty string summary
         } else if (line.startsWith('END:VEVENT')) {
           if (currentEvent && currentEvent.start && currentEvent.end) {
             events.push(currentEvent);
@@ -193,7 +191,8 @@
           } else if (line.startsWith('DTEND')) {
             currentEvent.end = parseICSTime(line.split(':')[1]);
           } else if (line.startsWith('SUMMARY')) {
-            currentEvent.summary = line.split(':')[1] || 'Available';
+            const sumValue = line.substring(8).trim(); 
+            currentEvent.summary = sumValue;
           }
         }
       }
@@ -271,7 +270,7 @@
       return slots;
     }
 
-    // --- COMPARISON LOGIC (BUSY = AVAILABLE) ---
+    // --- COMPARISON LOGIC ---
     function runComparison() {
       renderTable();
     }
@@ -300,13 +299,23 @@
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
-          // Overlapping event block means the instructor IS AVAILABLE
-          const activeShift = events.find(ev => ev.start < slot.end && ev.end > slot.start);
           
-          if (activeShift) {
-            available.push({ name: instName, title: activeShift.summary || 'On Duty' });
+          // Find any calendar block that overlaps with the student's slot
+          const overlappingEvent = events.find(ev => ev.start < slot.end && ev.end > slot.start);
+          
+          if (overlappingEvent) {
+            const cleanSummary = (overlappingEvent.summary || '').trim().toLowerCase();
+            
+            // Check condition: Title is empty OR explicitly says "available"
+            if (cleanSummary === '' || cleanSummary === 'available') {
+              available.push({ name: instName, label: overlappingEvent.summary || 'Open Slot' });
+            } else {
+              // It's a specific conflicting appointment (e.g., "Meeting", "Lecture")
+              unavailable.push({ name: instName, reason: overlappingEvent.summary });
+            }
           } else {
-            unavailable.push(instName);
+            // No calendar entry means they haven't explicitly blocked it out as active hours
+            unavailable.push({ name: instName, reason: 'No shift block scheduled' });
           }
         });
 
@@ -322,15 +331,15 @@
           <td class="p-4">
             <div class="flex flex-wrap gap-1.5">
               ${available.length > 0 
-                ? available.map(a => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium" title="Shift: ${a.title}">${a.name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">No instructors available</span>'}
+                ? available.map(a => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium" title="Calendar details: ${a.label}">${a.name}</span>`).join('') 
+                : '<span class="text-xs text-slate-400 italic">No open spots</span>'}
             </div>
           </td>
           <td class="p-4">
             <div class="flex flex-wrap gap-1.5">
               ${unavailable.length > 0 
-                ? unavailable.map(name => `<span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full border border-slate-200">${name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">All instructors available</span>'}
+                ? unavailable.map(u => `<span class="bg-slate-100 text-slate-600 text-xs px-2.5 py-1 rounded-full border border-slate-200" title="Reason: ${u.reason}">${u.name}</span>`).join('') 
+                : '<span class="text-xs text-slate-400 italic">None</span>'}
             </div>
           </td>
         `;
@@ -346,24 +355,27 @@
       const todayAt14 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 14, 0);
       const todayAt15 = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 15, 0);
 
-      instructorsData = {};
-      for (let i = 1; i <= 6; i++) {
-        const name = `Instructor ${i}`;
-        if (i % 2 === 0) {
-          instructorsData[name] = [{ start: todayAt10, end: todayAt11, summary: 'Available Hours' }];
-        } else {
-          instructorsData[name] = [{ start: todayAt14, end: todayAt15, summary: 'Tutoring Shift' }];
-        }
-      }
+      instructorsData = {
+        "Instructor Alpha": [
+          { start: todayAt10, end: todayAt11, summary: "Available" },
+          { start: todayAt14, end: todayAt15, summary: "Faculty Meeting" } // Busy
+        ],
+        "Instructor Beta": [
+          { start: todayAt10, end: todayAt11, summary: "" }, // Blank title -> Available
+          { start: todayAt14, end: todayAt15, summary: "available" }
+        ],
+        "Instructor Gamma": [
+          { start: todayAt10, end: todayAt11, summary: "Class Lecture" } // Busy
+        ]
+      };
 
       studentSlots = [
         { student: 'Alex Smith', start: todayAt10, end: todayAt11 },
-        { student: 'Jordan Lee', start: todayAt14, end: todayAt15 },
-        { student: 'Morgan Taylor', start: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 16, 0), end: new Date(now.getFullYear(), now.getMonth(), now.getDate(), 17, 0) }
+        { student: 'Jordan Lee', start: todayAt14, end: todayAt15 }
       ];
 
       updateInstructorStatus();
-      document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Loaded 3 demo student slots</span>`;
+      document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Loaded 2 demo student slots</span>`;
       runComparison();
     }
   </script>
