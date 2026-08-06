@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Cross-referencing Pending Student constraints with Instructor shifts</p>
+        <p class="text-indigo-200 text-sm">Automated Singular Stage Checker & Slot Assignment Engine</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -32,7 +32,7 @@
             📊 1. Load Student Availability (CSV)
           </h2>
           <p class="text-xs text-slate-500 mb-4">
-            Upload <code>Stage Check List (2).csv</code>. Filters for <strong>Pending</strong> requests automatically.
+            Upload <code>Stage Check List (2).csv</code> first. Filters for <strong>Pending</strong> requests automatically.
           </p>
         </div>
         <div>
@@ -72,8 +72,8 @@
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 class="text-xl font-bold text-slate-800">3. Optimized Calendar Matches</h2>
-          <p class="text-xs text-slate-500">Cross-referencing stated constraints with open blocks on active files.</p>
+          <h2 class="text-xl font-bold text-slate-800">3. Final Stage Checker Assignments</h2>
+          <p class="text-xs text-slate-500">Each student is assigned a single optimal Stage Checker and target slot.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -85,14 +85,14 @@
               <th class="p-4">Student Name</th>
               <th class="p-4">Stated Windows</th>
               <th class="p-4">Student Constraints & Comments</th>
-              <th class="p-4" title="Instructors whose open shifts align with text conditions">Best Matched Instructors</th>
-              <th class="p-4">Conflict / Unscheduled</th>
+              <th class="p-4">Assigned Stage Checker</th>
+              <th class="p-4">Target Scheduled Time</th>
             </tr>
           </thead>
           <tbody id="resultsTable" class="divide-y divide-slate-100">
             <tr>
               <td colspan="5" class="p-8 text-center text-slate-400">
-                Please load the student CSV file first, then add instructor calendars to calculate the best matches.
+                Please load the CSV file first, then add instructor calendars to compute singular assignments.
               </td>
             </tr>
           </tbody>
@@ -167,10 +167,7 @@
       for (let file of files) {
         const text = await file.text();
         
-        // 1. Try to extract calendar owner name from metadata header (X-WR-CALNAME)
         let instructorName = extractCalendarName(text);
-        
-        // 2. Fallback to filename if header doesn't exist
         if (!instructorName) {
           instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
         }
@@ -194,7 +191,6 @@
         const text = await response.text();
         
         let instructorName = extractCalendarName(text);
-        
         if (!instructorName) {
           const urlParts = url.split('/');
           instructorName = urlParts[urlParts.length - 1].replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, " ");
@@ -212,13 +208,11 @@
       }
     }
 
-    // Extract X-WR-CALNAME metadata property
     function extractCalendarName(icsText) {
       const lines = icsText.split(/\r\n|\n|\r/);
       for (let line of lines) {
         if (line.startsWith('X-WR-CALNAME:')) {
           let calName = line.substring(13).trim();
-          // Clean up common suffix tags from exported calendars
           calName = calName.replace(/(\s*-\s*Schedule|\s*Calendar|\s*Google)/gi, '');
           return calName;
         }
@@ -274,7 +268,7 @@
       return new Date(Date.UTC(yr, mo, da, hr, mi, se));
     }
 
-    // --- HEURISTIC MATCHING ENGINE ---
+    // --- SINGULAR SELECTION & RENDERING ENGINE ---
     function runComparison() {
       renderTable();
     }
@@ -295,33 +289,33 @@
         const fullSearchText = `${slot.student} ${slot.availability} ${slot.comments}`.toLowerCase();
         if (search && !fullSearchText.includes(search)) return;
 
-        const bestMatches = [];
-        const conflicts = [];
+        let assignedChecker = "Unassigned";
+        let assignedTime = "No matching open blocks found";
+        let matchReason = "Requires manual scheduling coordination";
+        let highestScore = -1;
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
           const hasSchedule = events && events.length > 0;
 
-          if (!hasSchedule) {
-            conflicts.push({ name: instName, reason: 'No Schedule Data' });
-            return;
-          }
+          if (!hasSchedule) return;
 
           const comment = slot.comments.toLowerCase();
           const nameClean = instName.toLowerCase();
-          
-          let score = 50;
-          let matchingReason = "Has active calendar availability blocks";
-
           const instLastName = nameClean.split(' ').pop();
+          
+          // Strict Exclusions
           if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${instLastName}`)) {
-            conflicts.push({ name: instName, reason: 'Explicitly requested alternative instructor' });
-            return;
+            return; 
           }
 
+          let currentScore = 50; 
+          let temporaryReason = "Active schedule availability detected";
+
+          // Explicit Requested Name Match
           if (comment.includes(nameClean) || comment.includes(instLastName)) {
-            score += 40;
-            matchingReason = "Explicitly named in student request notes";
+            currentScore += 40;
+            temporaryReason = "Explicitly requested by student notes";
           }
 
           const openBlocks = events.filter(ev => {
@@ -330,26 +324,33 @@
           });
 
           if (openBlocks.length > 0) {
-            score += 10;
+            currentScore += 10;
             
             if (comment.includes('morning') && openBlocks.some(ev => ev.start.getUTCHours() < 16)) {
-              score += 15;
-              matchingReason = "Matches morning preference window";
+              currentScore += 15;
+              temporaryReason = "Matches stated morning preference window";
             }
             if (comment.includes('friday') && openBlocks.some(ev => ev.start.getUTCDay() === 5)) {
-              score += 15;
-              matchingReason = "Matches Friday preference target";
+              currentScore += 15;
+              temporaryReason = "Matches specific Friday request block";
             }
-          }
 
-          if (score >= 50) {
-            bestMatches.push({ name: instName, reason: matchingReason, score: score });
-          } else {
-            conflicts.push({ name: instName, reason: 'Low preference/constraint conflict' });
+            if (currentScore > highestScore) {
+              highestScore = currentScore;
+              assignedChecker = instName;
+              matchReason = temporaryReason;
+
+              const bestBlock = openBlocks[0];
+              const startStr = bestBlock.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
+              const timeStr = bestBlock.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              assignedTime = `${startStr} @ ${timeStr}`;
+            }
           }
         });
 
-        bestMatches.sort((a, b) => b.score - a.score);
+        const badgeClass = assignedChecker !== "Unassigned" 
+          ? "bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold text-xs px-2.5 py-1 rounded-full border"
+          : "bg-amber-100 text-amber-800 border-amber-200 font-semibold text-xs px-2.5 py-1 rounded-full border";
 
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition';
@@ -367,18 +368,14 @@
             </p>
           </td>
           <td class="p-4">
-            <div class="flex flex-wrap gap-1.5">
-              ${bestMatches.length > 0 
-                ? bestMatches.map(b => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium border border-emerald-200" title="${b.reason}">${b.name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">No matches</span>'}
-            </div>
+            <span class="${badgeClass}" title="${matchReason}">
+              👤 ${assignedChecker}
+            </span>
           </td>
-          <td class="p-4">
-            <div class="flex flex-wrap gap-1.5">
-              ${conflicts.length > 0 
-                ? conflicts.map(c => `<span class="bg-slate-100 text-slate-500 text-xs px-2.5 py-1 rounded-full border border-slate-200" title="${c.reason}">${c.name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">None</span>'}
-            </div>
+          <td class="p-4 font-medium text-slate-700 text-xs">
+            <span class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded">
+              ⏰ ${assignedTime}
+            </span>
           </td>
         `;
         tbody.appendChild(tr);
