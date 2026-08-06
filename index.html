@@ -32,7 +32,7 @@
             📊 1. Load Student Availability (CSV)
           </h2>
           <p class="text-xs text-slate-500 mb-4">
-            Upload <code>Stage Check List (2).csv</code> first. The system filters for **Pending** requests.
+            Upload <code>Stage Check List (2).csv</code>. Filters for <strong>Pending</strong> requests automatically.
           </p>
         </div>
         <div>
@@ -160,13 +160,21 @@
       return slots;
     }
 
-    // --- STEP 2: ICS PARSING ---
+    // --- STEP 2: ICS PARSING & CALENDAR NAME EXTRACTION ---
     async function handleICSUpload(e) {
       const files = e.target.files;
       if (!files.length) return;
       for (let file of files) {
         const text = await file.text();
-        const instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+        
+        // 1. Try to extract calendar owner name from metadata header (X-WR-CALNAME)
+        let instructorName = extractCalendarName(text);
+        
+        // 2. Fallback to filename if header doesn't exist
+        if (!instructorName) {
+          instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
+        }
+        
         instructorsData[instructorName] = parseICS(text);
       }
       updateInstructorStatus();
@@ -179,15 +187,22 @@
       if (!url) return alert("Please enter a valid URL.");
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
 
-      const urlParts = url.split('/');
-      let instructorName = urlParts[urlParts.length - 1].replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, " ");
-      if (!instructorName || instructorName.length < 3) instructorName = `Instructor (${Object.keys(instructorsData).length + 1})`;
-
       try {
         const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
         let response = await fetch(proxyUrl);
         if (!response.ok) response = await fetch(url);
         const text = await response.text();
+        
+        let instructorName = extractCalendarName(text);
+        
+        if (!instructorName) {
+          const urlParts = url.split('/');
+          instructorName = urlParts[urlParts.length - 1].replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, " ");
+          if (!instructorName || instructorName.length < 3) {
+            instructorName = `Instructor (${Object.keys(instructorsData).length + 1})`;
+          }
+        }
+
         instructorsData[instructorName] = parseICS(text);
         urlInput.value = '';
         updateInstructorStatus();
@@ -195,6 +210,20 @@
       } catch (err) {
         alert(`CORS Restriction: Please download the .ics file and upload it manually via file input.`);
       }
+    }
+
+    // Extract X-WR-CALNAME metadata property
+    function extractCalendarName(icsText) {
+      const lines = icsText.split(/\r\n|\n|\r/);
+      for (let line of lines) {
+        if (line.startsWith('X-WR-CALNAME:')) {
+          let calName = line.substring(13).trim();
+          // Clean up common suffix tags from exported calendars
+          calName = calName.replace(/(\s*-\s*Schedule|\s*Calendar|\s*Google)/gi, '');
+          return calName;
+        }
+      }
+      return null;
     }
 
     function updateInstructorStatus() {
@@ -278,27 +307,23 @@
             return;
           }
 
-          // Smart heuristic matching: evaluate explicit exclusions or preferences written inside comments
           const comment = slot.comments.toLowerCase();
           const nameClean = instName.toLowerCase();
           
-          let score = 50; // Neutral baseline score
+          let score = 50;
           let matchingReason = "Has active calendar availability blocks";
 
-          // 1. Explicit Exclusions (e.g. "Not with Jisoo")
           const instLastName = nameClean.split(' ').pop();
           if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${instLastName}`)) {
             conflicts.push({ name: instName, reason: 'Explicitly requested alternative instructor' });
             return;
           }
 
-          // 2. Specific Preferred Instructor named in comment
           if (comment.includes(nameClean) || comment.includes(instLastName)) {
             score += 40;
             matchingReason = "Explicitly named in student request notes";
           }
 
-          // 3. Time Constraints vs Calendar Block Summary tags
           const openBlocks = events.filter(ev => {
             const sum = (ev.summary || '').toLowerCase();
             return sum === '' || sum === 'available' || sum === 'open' || sum === 'shift';
@@ -307,7 +332,6 @@
           if (openBlocks.length > 0) {
             score += 10;
             
-            // Contextual text analysis
             if (comment.includes('morning') && openBlocks.some(ev => ev.start.getUTCHours() < 16)) {
               score += 15;
               matchingReason = "Matches morning preference window";
@@ -325,7 +349,6 @@
           }
         });
 
-        // Sort best matching options by heuristic preference rating
         bestMatches.sort((a, b) => b.score - a.score);
 
         const tr = document.createElement('tr');
@@ -347,7 +370,7 @@
             <div class="flex flex-wrap gap-1.5">
               ${bestMatches.length > 0 
                 ? bestMatches.map(b => `<span class="bg-emerald-100 text-emerald-800 text-xs px-2.5 py-1 rounded-full font-medium border border-emerald-200" title="${b.reason}">${b.name}</span>`).join('') 
-                : '<span class="text-xs text-slate-400 italic">No perfect matches</span>'}
+                : '<span class="text-xs text-slate-400 italic">No matches</span>'}
             </div>
           </td>
           <td class="p-4">
