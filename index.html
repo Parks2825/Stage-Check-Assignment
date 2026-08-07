@@ -114,7 +114,7 @@
   <script>
     let studentSlots = [];     
     let instructorsData = {}; 
-    let instructorQualifications = {}; // Maps instructor name to array of qualified check types
+    let instructorQualifications = {}; 
 
     const STAGE_CHECK_TYPES = ['Private', 'Instrument', 'Commercial', 'Multi', 'CFI'];
 
@@ -162,8 +162,7 @@
         const combinedStatus = `${outcomeVal} ${availRaw} ${commText}`.toLowerCase();
         if (!combinedStatus.includes('pending')) continue;
 
-        // Auto-detect stage check type from CSV columns or comments
-        let detectedType = 'Private'; // Default fallback
+        let detectedType = 'Private'; 
         const checkSearchText = `${rawStage} ${commText}`.toLowerCase();
         
         if (checkSearchText.includes('instrument') || checkSearchText.includes('ifro') || checkSearchText.includes('inst')) {
@@ -199,7 +198,6 @@
         }
         instructorsData[instructorName] = parseICS(text);
         if (!instructorQualifications[instructorName]) {
-          // Default: qualified for all check types until customized in UI
           instructorQualifications[instructorName] = [...STAGE_CHECK_TYPES];
         }
       }
@@ -312,6 +310,8 @@
       } else {
         instructorQualifications[instructor].push(checkType);
       }
+      
+      // Instantly trigger re-matching and UI render
       runComparison();
     }
 
@@ -399,10 +399,10 @@
           const events = instructorsData[instName];
           if (!events || events.length === 0) return;
 
-          // QUALIFICATION CHECK: Verify if instructor is qualified for this student's check type
+          // Qualification Filter
           const quals = instructorQualifications[instName] || [];
           if (!quals.includes(slot.stageType)) {
-            return; // Skip instructor - not qualified for this stage check
+            return; 
           }
 
           const comment = slot.comments.toLowerCase();
@@ -517,7 +517,6 @@
         ]
       };
 
-      // Set distinct qualifications in demo data
       instructorQualifications = {
         "Blaine Oliver": ["Private", "Instrument"],
         "Trevor Seaholm": ["Commercial", "Multi", "CFI"]
