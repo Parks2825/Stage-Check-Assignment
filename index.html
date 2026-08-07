@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Automated Assignment Engine with Stage Check Qualifications</p>
+        <p class="text-indigo-200 text-sm">Automated Priority Assignment Engine with Stage Check Qualifications</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -91,8 +91,8 @@
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <h2 class="text-xl font-bold text-slate-800">3. Optimized Single Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Each student is assigned a qualified Stage Checker for an upcoming, non-overlapping slot.</p>
+          <h2 class="text-xl font-bold text-slate-800">3. Priority Stage Checker Assignments</h2>
+          <p class="text-xs text-slate-500">Students are matched strictly in list priority order (top-to-bottom) to the earliest available qualified slot.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -432,8 +432,11 @@
 
       const instructorNames = Object.keys(instructorsData);
       const now = new Date();
+      
+      // Global set tracking claimed slots to prevent double-booking across the priority queue
       const occupiedSlots = new Set();
 
+      // Process students sequentially (top of list gets absolute first priority for matching slots)
       studentSlots.forEach(slot => {
         const fullSearchText = `${slot.student} ${slot.stageType} ${slot.comments}`.toLowerCase();
         if (search && !fullSearchText.includes(search)) return;
@@ -441,74 +444,63 @@
         let assignedChecker = "Unassigned";
         let assignedTime = "No qualified open block found";
         let matchReason = "Requires manual scheduling coordination";
-        let highestScore = -1;
+        
+        let earliestMatchTime = Infinity;
         let chosenSlotKey = null;
         let chosenBlockTime = null;
+
+        const comment = slot.comments.toLowerCase();
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
           if (!events || events.length === 0) return;
 
+          // 1. Qualification Check
           const quals = instructorQualifications[instName] || [];
           const reqTypeClean = (slot.stageType || '').toLowerCase();
           const isQualified = quals.some(q => q.toLowerCase() === reqTypeClean);
+          if (!isQualified) return; 
 
-          if (!isQualified) {
-            return; 
-          }
-
-          const comment = slot.comments.toLowerCase();
+          // 2. Negative Constraint Check ("Not with...")
           const nameClean = instName.toLowerCase();
           const instLastName = nameClean.split(' ').pop();
-          
           if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${instLastName}`)) {
             return; 
           }
 
-          let currentScore = 50; 
-          let temporaryReason = `Qualified for ${slot.stageType}`;
-
-          if (comment.includes(nameClean) || comment.includes(instLastName)) {
-            currentScore += 40;
-            temporaryReason = "Explicitly requested by student notes";
-          }
-
-          const openBlocks = events.filter(ev => {
+          // 3. Scan Open Slots for Chronologically Earliest Block
+          events.forEach(ev => {
             const sum = (ev.summary || '').toLowerCase();
             const isExplicitlyOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window');
             const isFreeStatus = ev.transparent || ev.busyStatus === 'FREE';
             const isOpen = isExplicitlyOpen || isFreeStatus;
-
             const isFuture = ev.start > now;
-            const slotKey = `${instName}_${ev.start.toISOString()}`;
-            return isOpen && isFuture && !occupiedSlots.has(slotKey);
-          });
-
-          if (openBlocks.length > 0) {
-            currentScore += 10;
             
-            if (comment.includes('morning') && openBlocks.some(ev => ev.start.getHours() < 12)) {
-              currentScore += 15;
-              temporaryReason += " (Matches morning window)";
-            }
-            if (comment.includes('friday') && openBlocks.some(ev => ev.start.getDay() === 5)) {
-              currentScore += 15;
-              temporaryReason += " (Matches Friday request)";
-            }
+            const slotKey = `${instName}_${ev.start.toISOString()}`;
 
-            if (currentScore > highestScore) {
-              highestScore = currentScore;
-              assignedChecker = instName;
-              matchReason = temporaryReason;
+            if (isOpen && isFuture && !occupiedSlots.has(slotKey)) {
+              let matchesPreferences = true;
+              if (comment.includes('morning') && ev.start.getHours() >= 12) matchesPreferences = false;
+              if (comment.includes('friday') && ev.start.getDay() !== 5) matchesPreferences = false;
 
-              const bestBlock = openBlocks[0];
-              chosenSlotKey = `${instName}_${bestBlock.start.toISOString()}`;
-              
-              const startStr = bestBlock.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-              const timeStr = bestBlock.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-              chosenBlockTime = `${startStr} @ ${timeStr}`;
+              const blockTimeMs = ev.start.getTime();
+              if (blockTimeMs < earliestMatchTime) {
+                if (matchesPreferences || earliestMatchTime === Infinity) {
+                  earliestMatchTime = blockTimeMs;
+                  assignedChecker = instName;
+                  chosenSlotKey = slotKey;
+                  
+                  let reasonStr = `Priority match based on list order`;
+                  if (!matchesPreferences) reasonStr += ` (Fallback; preferred window unavailable)`;
+                  matchReason = reasonStr;
+
+                  const startStr = ev.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
+                  const timeStr = ev.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  chosenBlockTime = `${startStr} @ ${timeStr}`;
+                }
+              }
             }
-          }
+          });
         });
 
         if (chosenSlotKey) {
