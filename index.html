@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Automated Singular Assignment Engine (Strict 1-to-1 Future Allocation)</p>
+        <p class="text-indigo-200 text-sm">Automated Assignment Engine with Stage Check Qualifications</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -32,7 +32,7 @@
             📊 1. Load Student Availability (CSV)
           </h2>
           <p class="text-xs text-slate-500 mb-4">
-            Upload <code>Stage Check List (2).csv</code>. Filters for <strong>Pending</strong> requests automatically.
+            Upload <code>Stage Check List (2).csv</code>. Automatically extracts stage check type & pending status.
           </p>
         </div>
         <div>
@@ -68,12 +68,21 @@
 
     </div>
 
+    <!-- QUALIFICATIONS CONFIGURATION PANEL -->
+    <div id="qualificationsPanel" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hidden">
+      <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
+        ⚙️ Stage Checker Qualifications
+      </h2>
+      <p class="text-xs text-slate-500 mb-4">Select which stage checks each instructor is authorized to perform:</p>
+      <div id="instructorQualList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs"></div>
+    </div>
+
     <!-- COMPARISON RESULTS TABLE -->
     <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Optimized Single Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Each student is assigned a unique, upcoming stage check time slot. Past and busy blocks are excluded.</p>
+          <p class="text-xs text-slate-500">Each student is assigned a qualified Stage Checker for an upcoming, non-overlapping slot.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -83,7 +92,7 @@
           <thead>
             <tr class="bg-slate-50 text-slate-600 uppercase text-[11px] font-bold tracking-wider border-b border-slate-200">
               <th class="p-4">Student Name</th>
-              <th class="p-4">Stated Windows</th>
+              <th class="p-4">Requested Stage Check</th>
               <th class="p-4">Student Constraints & Comments</th>
               <th class="p-4">Assigned Stage Checker</th>
               <th class="p-4">Target Scheduled Time</th>
@@ -105,6 +114,9 @@
   <script>
     let studentSlots = [];     
     let instructorsData = {}; 
+    let instructorQualifications = {}; // Maps instructor name to array of qualified check types
+
+    const STAGE_CHECK_TYPES = ['Private', 'Instrument', 'Commercial', 'Multi', 'CFI'];
 
     document.getElementById('csvInput').addEventListener('change', handleCSVUpload);
     document.getElementById('icsInput').addEventListener('change', handleICSUpload);
@@ -130,6 +142,7 @@
       const nameIdx   = headers.findIndex(h => h.includes('student name'));
       const availIdx  = headers.findIndex(h => h.includes('availability'));
       const commIdx   = headers.findIndex(h => h.includes('comments'));
+      const stageIdx  = headers.findIndex(h => h.includes('stage') || h.includes('check type') || h.includes('course'));
       const outcomeIdx = headers.findIndex(h => h.includes('outcome'));
 
       const slots = [];
@@ -143,17 +156,33 @@
         const name = row[nameIdx !== -1 ? nameIdx : 0];
         const availRaw = row[availIdx !== -1 ? availIdx : 4] || 'N/A';
         const commText = row[commIdx !== -1 ? commIdx : 5] || 'None';
+        const rawStage = stageIdx !== -1 ? row[stageIdx] : '';
         const outcomeVal = row[outcomeIdx !== -1 ? outcomeIdx : 12] || '';
 
         const combinedStatus = `${outcomeVal} ${availRaw} ${commText}`.toLowerCase();
         if (!combinedStatus.includes('pending')) continue;
+
+        // Auto-detect stage check type from CSV columns or comments
+        let detectedType = 'Private'; // Default fallback
+        const checkSearchText = `${rawStage} ${commText}`.toLowerCase();
+        
+        if (checkSearchText.includes('instrument') || checkSearchText.includes('ifro') || checkSearchText.includes('inst')) {
+          detectedType = 'Instrument';
+        } else if (checkSearchText.includes('commercial') || checkSearchText.includes('cpo')) {
+          detectedType = 'Commercial';
+        } else if (checkSearchText.includes('multi')) {
+          detectedType = 'Multi';
+        } else if (checkSearchText.includes('cfi')) {
+          detectedType = 'CFI';
+        }
 
         let formattedAvail = availRaw.replace(/[\[\]"]/g, '').replace(/,/g, ', ');
 
         slots.push({
           student: name,
           availability: formattedAvail || 'Not specified',
-          comments: commText || 'None'
+          comments: commText || 'None',
+          stageType: detectedType
         });
       }
       return slots;
@@ -169,8 +198,13 @@
           instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
         }
         instructorsData[instructorName] = parseICS(text);
+        if (!instructorQualifications[instructorName]) {
+          // Default: qualified for all check types until customized in UI
+          instructorQualifications[instructorName] = [...STAGE_CHECK_TYPES];
+        }
       }
       updateInstructorStatus();
+      renderQualificationsUI();
       runComparison();
     }
 
@@ -196,8 +230,12 @@
         }
 
         instructorsData[instructorName] = parseICS(text);
+        if (!instructorQualifications[instructorName]) {
+          instructorQualifications[instructorName] = [...STAGE_CHECK_TYPES];
+        }
         urlInput.value = '';
         updateInstructorStatus();
+        renderQualificationsUI();
         runComparison();
       } catch (err) {
         alert(`CORS Restriction: Please download the .ics file and upload it manually via file input.`);
@@ -219,6 +257,62 @@
     function updateInstructorStatus() {
       const count = Object.keys(instructorsData).length;
       document.getElementById('instructorStats').innerHTML = `<span class="text-emerald-600">✓ Step 2 Complete: Loaded ${count} instructor calendar(s)</span>`;
+    }
+
+    function renderQualificationsUI() {
+      const container = document.getElementById('instructorQualList');
+      const panel = document.getElementById('qualificationsPanel');
+      const instructors = Object.keys(instructorsData);
+
+      if (instructors.length === 0) {
+        panel.classList.add('hidden');
+        return;
+      }
+
+      panel.classList.remove('hidden');
+      container.innerHTML = '';
+
+      instructors.forEach(inst => {
+        const card = document.createElement('div');
+        card.className = 'p-3 bg-slate-50 border border-slate-200 rounded-lg space-y-2';
+
+        const title = document.createElement('div');
+        title.className = 'font-semibold text-slate-800';
+        title.textContent = `👤 ${inst}`;
+        card.appendChild(title);
+
+        const checkboxesDiv = document.createElement('div');
+        checkboxesDiv.className = 'flex flex-wrap gap-2';
+
+        STAGE_CHECK_TYPES.forEach(type => {
+          const label = document.createElement('label');
+          label.className = 'inline-flex items-center gap-1 cursor-pointer bg-white px-2 py-1 rounded border border-slate-200 text-slate-700 hover:bg-slate-100';
+          
+          const isChecked = instructorQualifications[inst] && instructorQualifications[inst].includes(type);
+          
+          label.innerHTML = `
+            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleQual('${inst}', '${type}')" class="rounded text-indigo-600 focus:ring-indigo-500"/>
+            <span>${type}</span>
+          `;
+          checkboxesDiv.appendChild(label);
+        });
+
+        card.appendChild(checkboxesDiv);
+        container.appendChild(card);
+      });
+    }
+
+    function toggleQual(instructor, checkType) {
+      if (!instructorQualifications[instructor]) {
+        instructorQualifications[instructor] = [];
+      }
+      const idx = instructorQualifications[instructor].indexOf(checkType);
+      if (idx > -1) {
+        instructorQualifications[instructor].splice(idx, 1);
+      } else {
+        instructorQualifications[instructor].push(checkType);
+      }
+      runComparison();
     }
 
     function parseICS(icsText) {
@@ -291,11 +385,11 @@
       const occupiedSlots = new Set();
 
       studentSlots.forEach(slot => {
-        const fullSearchText = `${slot.student} ${slot.availability} ${slot.comments}`.toLowerCase();
+        const fullSearchText = `${slot.student} ${slot.stageType} ${slot.comments}`.toLowerCase();
         if (search && !fullSearchText.includes(search)) return;
 
         let assignedChecker = "Unassigned";
-        let assignedTime = "No unique open block found";
+        let assignedTime = "No qualified open block found";
         let matchReason = "Requires manual scheduling coordination";
         let highestScore = -1;
         let chosenSlotKey = null;
@@ -304,6 +398,12 @@
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
           if (!events || events.length === 0) return;
+
+          // QUALIFICATION CHECK: Verify if instructor is qualified for this student's check type
+          const quals = instructorQualifications[instName] || [];
+          if (!quals.includes(slot.stageType)) {
+            return; // Skip instructor - not qualified for this stage check
+          }
 
           const comment = slot.comments.toLowerCase();
           const nameClean = instName.toLowerCase();
@@ -314,14 +414,13 @@
           }
 
           let currentScore = 50; 
-          let temporaryReason = "Active upcoming availability detected";
+          let temporaryReason = `Qualified for ${slot.stageType} Stage Check`;
 
           if (comment.includes(nameClean) || comment.includes(instLastName)) {
             currentScore += 40;
             temporaryReason = "Explicitly requested by student notes";
           }
 
-          // Strict filter: Event MUST be explicitly marked Free/Transparent OR have open keywords.
           const openBlocks = events.filter(ev => {
             const sum = (ev.summary || '').toLowerCase();
             const isExplicitlyOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window');
@@ -338,11 +437,11 @@
             
             if (comment.includes('morning') && openBlocks.some(ev => ev.start.getHours() < 12)) {
               currentScore += 15;
-              temporaryReason = "Matches stated morning preference window";
+              temporaryReason += " (Matches morning window)";
             }
             if (comment.includes('friday') && openBlocks.some(ev => ev.start.getDay() === 5)) {
               currentScore += 15;
-              temporaryReason = "Matches specific Friday request block";
+              temporaryReason += " (Matches Friday request)";
             }
 
             if (currentScore > highestScore) {
@@ -375,8 +474,8 @@
         tr.innerHTML = `
           <td class="p-4 font-semibold text-slate-800">${slot.student}</td>
           <td class="p-4 text-slate-700 font-medium">
-            <span class="inline-block bg-slate-100 text-slate-700 px-2.5 py-1 rounded text-xs border border-slate-200">
-              ${slot.availability}
+            <span class="inline-block bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded text-xs border border-indigo-200 font-semibold">
+              ✈️ ${slot.stageType} Check
             </span>
           </td>
           <td class="p-4 text-xs text-slate-600 max-w-sm">
@@ -390,7 +489,7 @@
             </span>
           </td>
           <td class="p-4 font-medium text-slate-700 text-xs">
-            <span class="inline-flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-100 px-2 py-1 rounded">
+            <span class="inline-flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded">
               ⏰ ${assignedTime}
             </span>
           </td>
@@ -401,23 +500,31 @@
 
     function loadDemoData() {
       studentSlots = [
-        { student: 'Easton Jettie', availability: 'Weekdays, Weekends', comments: 'Not with Jisoo, otherwise available 8/3-8/5:1430-2000, 8/6:0600-1300' },
-        { student: 'Cameron Walton', availability: 'Weekdays, Weekends', comments: 'Tuesday Thursday Saturday mornings best, unavailable August 9th, 12th, 13th, 17th' },
-        { student: 'Jacob Mastromonico', availability: 'Weekdays, Weekends', comments: 'Blaine Oliver has availability Friday morning' }
+        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'Not with Jisoo' },
+        { student: 'Cameron Walton', stageType: 'Instrument', availability: 'Mornings', comments: 'Needs Instrument check' },
+        { student: 'Jacob Mastromonico', stageType: 'Commercial', availability: 'Fridays', comments: 'Commercial stage check request' }
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
-      const standardFutureOffset = 24 * 60 * 60 * 1000;
+      const offset = 24 * 60 * 60 * 1000;
       
       instructorsData = {
         "Blaine Oliver": [
-          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Available Window", transparent: true, busyStatus: 'FREE' }
+          { start: new Date(Date.now() + offset), end: new Date(Date.now() + offset + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
         ],
         "Trevor Seaholm": [
-          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Stage Check Flight", transparent: false, busyStatus: 'BUSY' }
+          { start: new Date(Date.now() + offset), end: new Date(Date.now() + offset + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
         ]
       };
+
+      // Set distinct qualifications in demo data
+      instructorQualifications = {
+        "Blaine Oliver": ["Private", "Instrument"],
+        "Trevor Seaholm": ["Commercial", "Multi", "CFI"]
+      };
+
       updateInstructorStatus();
+      renderQualificationsUI();
       runComparison();
     }
   </script>
