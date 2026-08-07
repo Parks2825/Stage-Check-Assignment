@@ -92,7 +92,7 @@
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Priority Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Students are matched strictly in list priority order (top-to-bottom) to the earliest available qualified slot.</p>
+          <p class="text-xs text-slate-500">Students are matched strictly in list order to the earliest available slot matching their qualifications & time constraints.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -442,7 +442,7 @@
         if (search && !fullSearchText.includes(search)) return;
 
         let assignedChecker = "Unassigned";
-        let assignedTime = "No qualified open block found";
+        let assignedTime = "No qualified open block found matching constraints";
         let matchReason = "Requires manual scheduling coordination";
         
         let earliestMatchTime = Infinity;
@@ -468,7 +468,7 @@
             return; 
           }
 
-          // 3. Scan Open Slots for Chronologically Earliest Block
+          // 3. Scan Open Slots for Chronologically Earliest Block Matching Time Rules
           events.forEach(ev => {
             const sum = (ev.summary || '').toLowerCase();
             const isExplicitlyOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window');
@@ -479,25 +479,50 @@
             const slotKey = `${instName}_${ev.start.toISOString()}`;
 
             if (isOpen && isFuture && !occupiedSlots.has(slotKey)) {
+              
+              // Dynamic Time Parsing from Comments
               let matchesPreferences = true;
+
+              // Parse "before X am/pm"
+              const beforeMatch = comment.match(/before\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+              if (beforeMatch) {
+                let maxHour = parseInt(beforeMatch[1], 10);
+                const period = beforeMatch[3] ? beforeMatch[3].toLowerCase() : null;
+                if (period === 'pm' && maxHour < 12) maxHour += 12;
+                if (period === 'am' && maxHour === 12) maxHour = 0;
+                if (!period && maxHour < 8) maxHour += 12; // Default to PM for small numbers (e.g., 1pm, 2pm)
+
+                if (ev.start.getHours() >= maxHour) matchesPreferences = false;
+              }
+
+              // Parse "after X am/pm"
+              const afterMatch = comment.match(/after\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+              if (afterMatch) {
+                let minHour = parseInt(afterMatch[1], 10);
+                const period = afterMatch[3] ? afterMatch[3].toLowerCase() : null;
+                if (period === 'pm' && minHour < 12) minHour += 12;
+                if (period === 'am' && minHour === 12) minHour = 0;
+                if (!period && minHour < 8) minHour += 12;
+
+                if (ev.start.getHours() < minHour) matchesPreferences = false;
+              }
+
+              // Keyword fallbacks
               if (comment.includes('morning') && ev.start.getHours() >= 12) matchesPreferences = false;
+              if (comment.includes('afternoon') && ev.start.getHours() < 12) matchesPreferences = false;
               if (comment.includes('friday') && ev.start.getDay() !== 5) matchesPreferences = false;
 
+              // Strict Enforcement: Only accept slots that satisfy all constraints
               const blockTimeMs = ev.start.getTime();
-              if (blockTimeMs < earliestMatchTime) {
-                if (matchesPreferences || earliestMatchTime === Infinity) {
-                  earliestMatchTime = blockTimeMs;
-                  assignedChecker = instName;
-                  chosenSlotKey = slotKey;
-                  
-                  let reasonStr = `Priority match based on list order`;
-                  if (!matchesPreferences) reasonStr += ` (Fallback; preferred window unavailable)`;
-                  matchReason = reasonStr;
+              if (matchesPreferences && blockTimeMs < earliestMatchTime) {
+                earliestMatchTime = blockTimeMs;
+                assignedChecker = instName;
+                chosenSlotKey = slotKey;
+                matchReason = `Priority match meeting all constraint rules`;
 
-                  const startStr = ev.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
-                  const timeStr = ev.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                  chosenBlockTime = `${startStr} @ ${timeStr}`;
-                }
+                const startStr = ev.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' });
+                const timeStr = ev.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                chosenBlockTime = `${startStr} @ ${timeStr}`;
               }
             }
           });
@@ -544,26 +569,35 @@
 
     function loadDemoData() {
       studentSlots = [
-        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'Not with Trevor' },
-        { student: 'Cameron Walton', stageType: 'Instrument', availability: 'Mornings', comments: 'Needs Instrument check' },
+        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'I can do anyday before 1pm' },
+        { student: 'Cameron Walton', stageType: 'Instrument', availability: 'Mornings', comments: 'Needs Instrument check after 2pm' },
         { student: 'Jacob Mastromonico', stageType: 'Commercial Stage 2', availability: 'Fridays', comments: 'C2 check request' }
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
       const offset = 24 * 60 * 60 * 1000;
       
+      // Setup demo calendar blocks at 10 AM (valid) and 2 PM (invalid for < 1pm rule)
+      const dateTomorrow = new Date(Date.now() + offset);
+      
+      const morningSlot = new Date(dateTomorrow);
+      morningSlot.setHours(10, 0, 0, 0);
+
+      const afternoonSlot = new Date(dateTomorrow);
+      afternoonSlot.setHours(14, 0, 0, 0);
+
       instructorsData = {
         "Blaine Oliver": [
-          { start: new Date(Date.now() + offset), end: new Date(Date.now() + offset + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
+          { start: morningSlot, end: new Date(morningSlot.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
         ],
         "Trevor Seaholm": [
-          { start: new Date(Date.now() + offset), end: new Date(Date.now() + offset + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
+          { start: afternoonSlot, end: new Date(afternoonSlot.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
         ]
       };
 
       instructorQualifications = {
         "Blaine Oliver": ["Private", "Instrument", "Commercial Stage 1"],
-        "Trevor Seaholm": ["Commercial Stage 2", "Commercial Stage 3", "Multi", "CFI"]
+        "Trevor Seaholm": ["Private", "Commercial Stage 2", "Commercial Stage 3", "Multi", "CFI"]
       };
 
       updateInstructorStatus();
