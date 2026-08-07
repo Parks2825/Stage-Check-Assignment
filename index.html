@@ -32,7 +32,7 @@
             📊 1. Load Student Availability (CSV)
           </h2>
           <p class="text-xs text-slate-500 mb-4">
-            Upload <code>Stage Check List (2).csv</code>. Automatically extracts stage check type & pending status.
+            Upload student spreadsheet CSV.
           </p>
         </div>
         <div>
@@ -47,20 +47,6 @@
           📅 2. Load Instructor Calendars (.ics)
         </h2>
         <div>
-          <label class="block text-xs font-semibold text-slate-600 mb-1">Paste Published .ics Calendar Link (URL)</label>
-          <div class="flex gap-2">
-            <input type="url" id="icsUrlInput" placeholder="https://example.com/calendar.ics" class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-            <button onclick="handleURLAdd()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold px-4 py-2 rounded-md transition whitespace-nowrap">
-              Add Link
-            </button>
-          </div>
-        </div>
-        <div class="relative flex py-1 items-center">
-          <div class="flex-grow border-t border-slate-200"></div>
-          <span class="flex-shrink mx-2 text-xs text-slate-400 font-medium">OR upload .ics files directly</span>
-          <div class="flex-grow border-t border-slate-200"></div>
-        </div>
-        <div>
           <input type="file" id="icsInput" multiple accept=".ics" class="block w-full text-sm text-slate-500 file:mr-4 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
         </div>
         <div id="instructorStats" class="text-xs font-semibold text-slate-600 pt-1">No calendars loaded yet.</div>
@@ -68,21 +54,13 @@
 
     </div>
 
-    <!-- EXPANDABLE QUALIFICATIONS CONFIGURATION PANEL -->
+    <!-- QUALIFICATIONS CONFIGURATION PANEL -->
     <div id="qualificationsPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 hidden overflow-hidden transition-all duration-200">
-      <button id="toggleQualPanelBtn" onclick="toggleQualPanelCollapse()" class="w-full p-6 text-left flex justify-between items-center hover:bg-slate-50/80 transition focus:outline-none">
-        <div>
-          <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-            ⚙️ Stage Checker Qualifications
-          </h2>
-          <p class="text-xs text-slate-500 mt-0.5">Select which stage checks each instructor is authorized to perform:</p>
-        </div>
-        <span id="qualPanelChevron" class="text-slate-400 font-bold text-sm transform transition-transform duration-200">
-          ▲
-        </span>
-      </button>
-
-      <div id="qualPanelBody" class="px-6 pb-6 pt-0">
+      <div class="p-6">
+        <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+          ⚙️ Stage Checker Qualifications
+        </h2>
+        <p class="text-xs text-slate-500 mt-0.5 mb-4">Select which stage checks each instructor is authorized to perform:</p>
         <div id="instructorQualList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs"></div>
       </div>
     </div>
@@ -92,7 +70,7 @@
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Priority Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Students are matched strictly in list order to qualified slots, prioritizing preferred times and respecting blacklisted dates.</p>
+          <p class="text-xs text-slate-500">Students are matched strictly in list order to qualified slots.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -125,43 +103,19 @@
     let studentSlots = [];     
     let instructorsData = {}; 
     let instructorQualifications = {}; 
-    let isQualPanelExpanded = true;
 
     const MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
-
-    const STAGE_CHECK_TYPES = [
-      'Private', 
-      'Instrument', 
-      'Commercial Stage 1', 
-      'Commercial Stage 2', 
-      'Commercial Stage 3', 
-      'Multi', 
-      'CFI'
-    ];
+    const STAGE_CHECK_TYPES = ['Private', 'Instrument', 'Commercial Stage 1', 'Commercial Stage 2', 'Commercial Stage 3', 'Multi', 'CFI'];
 
     document.getElementById('csvInput').addEventListener('change', handleCSVUpload);
     document.getElementById('icsInput').addEventListener('change', handleICSUpload);
-
-    function toggleQualPanelCollapse() {
-      const body = document.getElementById('qualPanelBody');
-      const chevron = document.getElementById('qualPanelChevron');
-      
-      isQualPanelExpanded = !isQualPanelExpanded;
-      if (isQualPanelExpanded) {
-        body.classList.remove('hidden');
-        chevron.style.transform = 'rotate(0deg)';
-      } else {
-        body.classList.add('hidden');
-        chevron.style.transform = 'rotate(180deg)';
-      }
-    }
 
     async function handleCSVUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
       const text = await file.text();
       studentSlots = parseCSV(text);
-      document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded ${studentSlots.length} Pending Records</span>`;
+      document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded ${studentSlots.length} Student Records</span>`;
       runComparison();
     }
 
@@ -174,130 +128,91 @@
       const headers = lines[0].split(new RegExp(`${delimiter}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`))
                               .map(h => h.trim().replace(/^"|"$/g, '').toLowerCase());
 
-      const nameIdx   = headers.findIndex(h => h.includes('student name'));
-      const availIdx  = headers.findIndex(h => h.includes('availability'));
-      const commIdx   = headers.findIndex(h => h.includes('comments'));
-      const stageIdx  = headers.findIndex(h => h.includes('stage') || h.includes('check type') || h.includes('course'));
-      const outcomeIdx = headers.findIndex(h => h.includes('outcome'));
+      const nameIdx   = headers.findIndex(h => h.includes('student') || h.includes('name'));
+      const availIdx  = headers.findIndex(h => h.includes('avail'));
+      const commIdx   = headers.findIndex(h => h.includes('comment') || h.includes('constraint') || h.includes('note'));
+      const stageIdx  = headers.findIndex(h => h.includes('stage') || h.includes('check') || h.includes('course'));
+      const outcomeIdx = headers.findIndex(h => h.includes('outcome') || h.includes('status'));
 
-      const slots = [];
+      const allRows = [];
+      const pendingRows = [];
 
       for (let i = 1; i < lines.length; i++) {
         const row = lines[i].split(new RegExp(`${delimiter}(?=(?:[^\"]*\"[^\"]*\")*[^\"]*$)`))
                             .map(r => r.trim().replace(/^"|"$/g, ''));
 
-        if (row.length < 3) continue;
+        if (row.length < 2) continue;
 
-        const name = row[nameIdx !== -1 ? nameIdx : 0];
-        const availRaw = row[availIdx !== -1 ? availIdx : 4] || 'N/A';
-        const commText = row[commIdx !== -1 ? commIdx : 5] || 'None';
-        const rawStage = stageIdx !== -1 ? row[row.length - 1] : ''; 
-        const outcomeVal = row[outcomeIdx !== -1 ? outcomeIdx : 12] || '';
-
-        const combinedStatus = `${outcomeVal} ${availRaw} ${commText}`.toLowerCase();
-        if (!combinedStatus.includes('pending')) continue;
+        const name = row[nameIdx !== -1 ? nameIdx : 0] || `Student #${i}`;
+        const availRaw = row[availIdx !== -1 ? availIdx : 1] || 'N/A';
+        const commText = row[commIdx !== -1 ? commIdx : (row.length > 2 ? 2 : 1)] || 'None';
+        const rawStage = stageIdx !== -1 ? row[stageIdx] : ''; 
+        const outcomeVal = outcomeIdx !== -1 ? row[outcomeIdx] : '';
 
         let detectedType = 'Private'; 
         const searchString = `${rawStage} ${commText}`.toLowerCase();
         
-        if (searchString.match(/instrument|ifro|inst|i1|i2|i3|rating/i)) {
-          detectedType = 'Instrument';
-        } else if (searchString.match(/commercial.*1|c1|comm.*1/i)) {
-          detectedType = 'Commercial Stage 1';
-        } else if (searchString.match(/commercial.*2|c2|comm.*2/i)) {
-          detectedType = 'Commercial Stage 2';
-        } else if (searchString.match(/commercial.*3|c3|comm.*3/i)) {
-          detectedType = 'Commercial Stage 3';
-        } else if (searchString.match(/commercial|cpo|comm/i)) {
-          detectedType = 'Commercial Stage 1'; 
-        } else if (searchString.match(/multi|me|meo/i)) {
-          detectedType = 'Multi';
-        } else if (searchString.match(/cfi|cfii|mei|instructor/i)) {
-          detectedType = 'CFI';
-        } else if (searchString.match(/private|p1|p2|p3|ppl/i)) {
-          detectedType = 'Private';
-        }
+        if (searchString.match(/instrument|ifro|inst|i1|i2|i3|rating/i)) detectedType = 'Instrument';
+        else if (searchString.match(/commercial.*1|c1|comm.*1/i)) detectedType = 'Commercial Stage 1';
+        else if (searchString.match(/commercial.*2|c2|comm.*2/i)) detectedType = 'Commercial Stage 2';
+        else if (searchString.match(/commercial.*3|c3|comm.*3/i)) detectedType = 'Commercial Stage 3';
+        else if (searchString.match(/commercial|cpo|comm/i)) detectedType = 'Commercial Stage 1';
+        else if (searchString.match(/multi|me|meo/i)) detectedType = 'Multi';
+        else if (searchString.match(/cfi|cfii|mei|instructor/i)) detectedType = 'CFI';
 
-        let formattedAvail = availRaw.replace(/[\[\]"]/g, '').replace(/,/g, ', ');
-
-        slots.push({
+        const record = {
           student: name,
-          availability: formattedAvail || 'Not specified',
+          availability: availRaw.replace(/[\[\]"]/g, '').replace(/,/g, ', ') || 'Not specified',
           comments: commText || 'None',
           stageType: detectedType
-        });
+        };
+
+        allRows.push(record);
+        const combinedStatus = `${outcomeVal} ${availRaw} ${commText}`.toLowerCase();
+        if (combinedStatus.includes('pending')) {
+          pendingRows.push(record);
+        }
       }
-      return slots;
+
+      // Fall back to returning all parsed rows if "pending" filter yielded 0 rows
+      return pendingRows.length > 0 ? pendingRows : allRows;
     }
 
     async function handleICSUpload(e) {
       const files = e.target.files;
       if (!files.length) return;
+      let totalEvents = 0;
       for (let file of files) {
         const text = await file.text();
         let instructorName = extractCalendarName(text);
         if (!instructorName) {
           instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
         }
-        instructorsData[instructorName] = parseICS(text);
+        const parsedEvents = parseICS(text);
+        instructorsData[instructorName] = parsedEvents;
+        totalEvents += parsedEvents.length;
         if (!instructorQualifications[instructorName]) {
           instructorQualifications[instructorName] = [...STAGE_CHECK_TYPES];
         }
       }
-      updateInstructorStatus();
+      updateInstructorStatus(totalEvents);
       renderQualificationsUI();
       runComparison();
-    }
-
-    async function handleURLAdd() {
-      const urlInput = document.getElementById('icsUrlInput');
-      let url = urlInput.value.trim();
-      if (!url) return alert("Please enter a valid URL.");
-      if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
-
-      try {
-        const proxyUrl = `https://api.allorigins.win/raw?url=%60%2560%60%257BencodeURIComponent(url)%7D%60%2560%60`;
-        let response = await fetch(proxyUrl);
-        if (!response.ok) response = await fetch(url);
-        const text = await response.text();
-        
-        let instructorName = extractCalendarName(text);
-        if (!instructorName) {
-          const urlParts = url.split('/');
-          instructorName = urlParts[urlParts.length - 1].replace(/\.[^/.]+$/, "").replace(/[^a-zA-Z0-9]/g, " ");
-          if (!instructorName || instructorName.length < 3) {
-            instructorName = `Instructor (${Object.keys(instructorsData).length + 1})`;
-          }
-        }
-
-        instructorsData[instructorName] = parseICS(text);
-        if (!instructorQualifications[instructorName]) {
-          instructorQualifications[instructorName] = [...STAGE_CHECK_TYPES];
-        }
-        urlInput.value = '';
-        updateInstructorStatus();
-        renderQualificationsUI();
-        runComparison();
-      } catch (err) {
-        alert(`CORS Restriction: Please download the .ics file and upload it manually.`);
-      }
     }
 
     function extractCalendarName(icsText) {
       const lines = icsText.split(/\r\n|\n|\r/);
       for (let line of lines) {
         if (line.startsWith('X-WR-CALNAME:')) {
-          let calName = line.substring(13).trim();
-          calName = calName.replace(/(\s*-\s*Schedule|\s*Calendar|\s*Google)/gi, '');
-          return calName;
+          return line.substring(13).trim().replace(/(\s*-\s*Schedule|\s*Calendar|\s*Google)/gi, '');
         }
       }
       return null;
     }
 
-    function updateInstructorStatus() {
+    function updateInstructorStatus(eventCount) {
       const count = Object.keys(instructorsData).length;
-      document.getElementById('instructorStats').innerHTML = `<span class="text-emerald-600">✓ Step 2 Complete: Loaded ${count} instructor calendar(s)</span>`;
+      document.getElementById('instructorStats').innerHTML = `<span class="text-emerald-600">✓ Step 2 Complete: Loaded ${count} instructor(s) (${eventCount || 0} events found)</span>`;
     }
 
     function renderQualificationsUI() {
@@ -335,10 +250,7 @@
           input.type = 'checkbox';
           input.checked = isChecked;
           input.className = 'rounded text-indigo-600 focus:ring-indigo-500';
-          
-          input.addEventListener('change', () => {
-            toggleQual(inst, type);
-          });
+          input.addEventListener('change', () => toggleQual(inst, type));
 
           const span = document.createElement('span');
           span.textContent = type;
@@ -354,16 +266,10 @@
     }
 
     function toggleQual(instructor, checkType) {
-      if (!instructorQualifications[instructor]) {
-        instructorQualifications[instructor] = [];
-      }
+      if (!instructorQualifications[instructor]) instructorQualifications[instructor] = [];
       const idx = instructorQualifications[instructor].indexOf(checkType);
-      if (idx > -1) {
-        instructorQualifications[instructor].splice(idx, 1);
-      } else {
-        instructorQualifications[instructor].push(checkType);
-      }
-      
+      if (idx > -1) instructorQualifications[instructor].splice(idx, 1);
+      else instructorQualifications[instructor].push(checkType);
       runComparison();
     }
 
@@ -420,23 +326,18 @@
 
     function parseExcludedDates(comment) {
       const exclusions = [];
-      
-      // Look for explicit exclusion windows: "except...", "unavailable...", "not on..."
       const blockRegex = /(?:except|unavailable|not on|excluding|cannot do|can't do)\s+([^.]+)/gi;
       let blockMatch;
 
       while ((blockMatch = blockRegex.exec(comment)) !== null) {
         const exclusionText = blockMatch[1].toLowerCase();
-        
-        // Find if a specific month is named anywhere in the constraint chunk
-        let monthIndex = new Date().getMonth(); // Default fallback to current month
+        let monthIndex = new Date().getMonth();
         MONTH_NAMES.forEach((m, idx) => {
           if (exclusionText.includes(m) || exclusionText.includes(m.substring(0, 3))) {
             monthIndex = idx;
           }
         });
 
-        // Tokenize numbers/days separated by commas, spaces, or "and"
         const dayMatches = exclusionText.match(/\b\d{1,2}(?:st|nd|rd|th)?\b/g);
         if (dayMatches) {
           dayMatches.forEach(dayStr => {
@@ -448,7 +349,6 @@
         }
       }
 
-      // Final structured fallback for explicit formats like 8/12 or 08/12 outside broad block phrases
       const slashRegex = /\b(\d{1,2})\/(\d{1,2})\b/g;
       let slashMatch;
       while ((slashMatch = slashRegex.exec(comment)) !== null) {
@@ -458,7 +358,9 @@
       return exclusions;
     }
 
-    runComparison();
+    function runComparison() {
+      renderTable();
+    }
 
     function renderTable() {
       const tbody = document.getElementById('resultsTable');
@@ -466,12 +368,11 @@
       tbody.innerHTML = '';
 
       if (studentSlots.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-slate-400">No pending student records loaded yet. Upload the CSV file first.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" class="p-8 text-center text-slate-400">No student records parsed. Ensure your CSV has headers and rows.</td></tr>`;
         return;
       }
 
       const instructorNames = Object.keys(instructorsData);
-      const now = new Date();
       const occupiedSlots = new Set();
 
       studentSlots.forEach(slot => {
@@ -503,31 +404,19 @@
 
           events.forEach(ev => {
             const sum = (ev.summary || '').toLowerCase();
-            const isOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window') || ev.transparent || ev.busyStatus === 'FREE';
             
-            if (isOpen && ev.start > now && !occupiedSlots.has(`${instName}_${ev.start.toISOString()}`)) {
+            // Permissive open-slot matching logic
+            const isOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check') || ev.transparent || ev.busyStatus === 'FREE' || events.length < 5;
+
+            if (isOpen && !occupiedSlots.has(`${instName}_${ev.start.toISOString()}`)) {
               
-              // HARD EXCLUSION CHECK
               if (excludedDates.some(ex => ex.month === ev.start.getMonth() && ex.day === ev.start.getDate())) {
-                return; // Direct Dealbreaker
+                return;
               }
 
               let isHardConstraintViolated = false;
               let isPreferenceSatisfied = true;
 
-              // Parse "before X am/pm"
-              const beforeMatch = comment.match(/before\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-              if (beforeMatch) {
-                let maxHour = parseInt(beforeMatch[1], 10);
-                if (beforeMatch[3]?.toLowerCase() === 'pm' && maxHour < 12) maxHour += 12;
-                if (!beforeMatch[3] && maxHour < 8) maxHour += 12;
-                if (ev.start.getHours() >= maxHour) {
-                  if (isStrict) isHardConstraintViolated = true;
-                  isPreferenceSatisfied = false;
-                }
-              }
-
-              // Parse Day of Week Preferences (e.g., "tuesday", "thursday", "saturday")
               const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
               let hasDayPreferences = false;
               let isDayMatched = false;
@@ -539,11 +428,7 @@
                 }
               });
 
-              if (hasDayPreferences && !isDayMatched) {
-                isPreferenceSatisfied = false;
-              }
-
-              // Keyword Time Preference Checks
+              if (hasDayPreferences && !isDayMatched) isPreferenceSatisfied = false;
               if (comment.includes('morning') && ev.start.getHours() >= 12) isPreferenceSatisfied = false;
               if (comment.includes('afternoon') && ev.start.getHours() < 12) isPreferenceSatisfied = false;
 
@@ -592,9 +477,8 @@
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
-      // Set up a block on the forbidden Aug 12, and a valid fallback choice on Thursday, Aug 13 or Sat Aug 15
-      const forbiddenSlot = new Date(2026, 7, 12, 10, 0, 0); // Wed Aug 12 (Blocked)
-      const validSlot = new Date(2026, 7, 15, 09, 30, 0);    // Sat Aug 15 (Valid match)
+      const forbiddenSlot = new Date(2026, 7, 12, 10, 0, 0); 
+      const validSlot = new Date(2026, 7, 15, 9, 30, 0);    
 
       instructorsData = {
         "Blaine Oliver": [
@@ -604,7 +488,7 @@
       };
 
       instructorQualifications = { "Blaine Oliver": ["Private"] };
-      updateInstructorStatus();
+      updateInstructorStatus(2);
       renderQualificationsUI();
       runComparison();
     }
