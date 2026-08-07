@@ -73,7 +73,7 @@
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Optimized Single Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Each student is assigned a unique, upcoming stage check time slot. Past blocks are excluded.</p>
+          <p class="text-xs text-slate-500">Each student is assigned a unique, upcoming stage check time slot. Past and busy blocks are excluded.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -109,7 +109,6 @@
     document.getElementById('csvInput').addEventListener('change', handleCSVUpload);
     document.getElementById('icsInput').addEventListener('change', handleICSUpload);
 
-    // --- STEP 1: CSV PARSING ---
     async function handleCSVUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -160,18 +159,15 @@
       return slots;
     }
 
-    // --- STEP 2: ICS PARSING & CALENDAR NAME EXTRACTION ---
     async function handleICSUpload(e) {
       const files = e.target.files;
       if (!files.length) return;
       for (let file of files) {
         const text = await file.text();
-        
         let instructorName = extractCalendarName(text);
         if (!instructorName) {
           instructorName = file.name.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
         }
-        
         instructorsData[instructorName] = parseICS(text);
       }
       updateInstructorStatus();
@@ -232,7 +228,7 @@
 
       for (let line of lines) {
         if (line.startsWith('BEGIN:VEVENT')) {
-          currentEvent = { summary: '' };
+          currentEvent = { summary: '', transparent: false, busyStatus: 'BUSY' };
         } else if (line.startsWith('END:VEVENT')) {
           if (currentEvent && currentEvent.start && currentEvent.end) {
             events.push(currentEvent);
@@ -245,6 +241,10 @@
             currentEvent.end = parseICSTime(line.split(':')[1]);
           } else if (line.startsWith('SUMMARY')) {
             currentEvent.summary = line.substring(8).trim();
+          } else if (line.startsWith('TRANSP:TRANSPARENT')) {
+            currentEvent.transparent = true;
+          } else if (line.includes('X-MICROSOFT-CDO-BUSYSTATUS:FREE')) {
+            currentEvent.busyStatus = 'FREE';
           }
         }
       }
@@ -253,22 +253,25 @@
 
     function parseICSTime(str) {
       if (!str) return null;
+      const hasZ = str.endsWith('Z');
       const clean = str.trim().replace(/Z$/, '');
       if (clean.length < 8) return null;
-      const yr = clean.substring(0, 4);
-      const mo = clean.substring(4, 6) - 1;
-      const da = clean.substring(6, 8);
+      
+      const yr = parseInt(clean.substring(0, 4), 10);
+      const mo = parseInt(clean.substring(4, 6), 10) - 1;
+      const da = parseInt(clean.substring(6, 8), 10);
       let hr = 0, mi = 0, se = 0;
+
       if (clean.includes('T')) {
         const timePart = clean.split('T')[1];
-        hr = timePart.substring(0, 2) || 0;
-        mi = timePart.substring(2, 4) || 0;
-        se = timePart.substring(4, 6) || 0;
+        hr = parseInt(timePart.substring(0, 2), 10) || 0;
+        mi = parseInt(timePart.substring(2, 4), 10) || 0;
+        se = parseInt(timePart.substring(4, 6), 10) || 0;
       }
-      return new Date(Date.UTC(yr, mo, da, hr, mi, se));
+
+      return hasZ ? new Date(Date.UTC(yr, mo, da, hr, mi, se)) : new Date(yr, mo, da, hr, mi, se);
     }
 
-    // --- FUTURE-ONLY NON-OVERLAPPING SINGULAR SELECTION ENGINE ---
     function runComparison() {
       renderTable();
     }
@@ -284,9 +287,7 @@
       }
 
       const instructorNames = Object.keys(instructorsData);
-      const now = new Date(); // Current timestamp line in the sand
-      
-      // Registry to track claimed slots: key = "InstructorName_ISOStartTime"
+      const now = new Date();
       const occupiedSlots = new Set();
 
       studentSlots.forEach(slot => {
@@ -294,7 +295,7 @@
         if (search && !fullSearchText.includes(search)) return;
 
         let assignedChecker = "Unassigned";
-        let assignedTime = "No unique upcoming block found";
+        let assignedTime = "No unique open block found";
         let matchReason = "Requires manual scheduling coordination";
         let highestScore = -1;
         let chosenSlotKey = null;
@@ -302,15 +303,12 @@
 
         instructorNames.forEach(instName => {
           const events = instructorsData[instName];
-          const hasSchedule = events && events.length > 0;
-
-          if (!hasSchedule) return;
+          if (!events || events.length === 0) return;
 
           const comment = slot.comments.toLowerCase();
           const nameClean = instName.toLowerCase();
           const instLastName = nameClean.split(' ').pop();
           
-          // Strict Exclusion Check
           if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${instLastName}`)) {
             return; 
           }
@@ -318,17 +316,19 @@
           let currentScore = 50; 
           let temporaryReason = "Active upcoming availability detected";
 
-          // Explicit Requested Name Match
           if (comment.includes(nameClean) || comment.includes(instLastName)) {
             currentScore += 40;
             temporaryReason = "Explicitly requested by student notes";
           }
 
-          // Filter for valid open shifts that are both UNCLAIMED and in the FUTURE
+          // Strict filter: Event MUST be explicitly marked Free/Transparent OR have open keywords.
           const openBlocks = events.filter(ev => {
             const sum = (ev.summary || '').toLowerCase();
-            const isOpen = (sum === '' || sum === 'available' || sum === 'open' || sum === 'shift');
-            const isFuture = ev.start > now; // Discards historical availability
+            const isExplicitlyOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window');
+            const isFreeStatus = ev.transparent || ev.busyStatus === 'FREE';
+            const isOpen = isExplicitlyOpen || isFreeStatus;
+
+            const isFuture = ev.start > now;
             const slotKey = `${instName}_${ev.start.toISOString()}`;
             return isOpen && isFuture && !occupiedSlots.has(slotKey);
           });
@@ -336,11 +336,11 @@
           if (openBlocks.length > 0) {
             currentScore += 10;
             
-            if (comment.includes('morning') && openBlocks.some(ev => ev.start.getUTCHours() < 16)) {
+            if (comment.includes('morning') && openBlocks.some(ev => ev.start.getHours() < 12)) {
               currentScore += 15;
               temporaryReason = "Matches stated morning preference window";
             }
-            if (comment.includes('friday') && openBlocks.some(ev => ev.start.getUTCDay() === 5)) {
+            if (comment.includes('friday') && openBlocks.some(ev => ev.start.getDay() === 5)) {
               currentScore += 15;
               temporaryReason = "Matches specific Friday request block";
             }
@@ -350,7 +350,6 @@
               assignedChecker = instName;
               matchReason = temporaryReason;
 
-              // Select the first upcoming unclaimed block for this instructor
               const bestBlock = openBlocks[0];
               chosenSlotKey = `${instName}_${bestBlock.start.toISOString()}`;
               
@@ -361,7 +360,6 @@
           }
         });
 
-        // Register the slot as occupied so future rows cannot double book it
         if (chosenSlotKey) {
           occupiedSlots.add(chosenSlotKey);
           assignedTime = chosenBlockTime;
@@ -401,7 +399,6 @@
       });
     }
 
-    // Generates test elements pointing precisely into the future relative to execution
     function loadDemoData() {
       studentSlots = [
         { student: 'Easton Jettie', availability: 'Weekdays, Weekends', comments: 'Not with Jisoo, otherwise available 8/3-8/5:1430-2000, 8/6:0600-1300' },
@@ -410,20 +407,17 @@
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
-      const standardFutureOffset = 24 * 60 * 60 * 1000; // +1 day out
+      const standardFutureOffset = 24 * 60 * 60 * 1000;
       
       instructorsData = {
         "Blaine Oliver": [
-          { start: new Date(Date.now() - standardFutureOffset), end: new Date(Date.now() - standardFutureOffset + 7200000), summary: "Available" }, // EXCLUDED: Past
-          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Available" }, // INCLUDED: Future
-          { start: new Date(Date.now() + (standardFutureOffset * 2)), end: new Date(Date.now() + (standardFutureOffset * 2) + 7200000), summary: "Available" }
+          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Available Window", transparent: true, busyStatus: 'FREE' }
         ],
-        "Jisoo Kim": [
-          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Available" }
+        "Trevor Seaholm": [
+          { start: new Date(Date.now() + standardFutureOffset), end: new Date(Date.now() + standardFutureOffset + 7200000), summary: "Stage Check Flight", transparent: false, busyStatus: 'BUSY' }
         ]
       };
       updateInstructorStatus();
-      
       runComparison();
     }
   </script>
