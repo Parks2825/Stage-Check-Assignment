@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Automated Priority Assignment Engine with Soft Preference Fallbacks</p>
+        <p class="text-indigo-200 text-sm">Automated Priority Assignment Engine with Dynamic Date Exclusion Parsing</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -92,7 +92,7 @@
       <div class="p-6 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800">3. Priority Stage Checker Assignments</h2>
-          <p class="text-xs text-slate-500">Students are matched strictly in list order to qualified slots, prioritizing preferred times with fallback to available openings.</p>
+          <p class="text-xs text-slate-500">Students are matched strictly in list order to qualified slots, prioritizing preferred times and respecting blacklisted dates.</p>
         </div>
         <input type="text" id="searchInput" onkeyup="renderTable()" placeholder="Search student name or comment..." class="border border-slate-300 rounded-md px-3 py-1.5 text-sm w-full md:w-64 focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
       </div>
@@ -126,6 +126,8 @@
     let instructorsData = {}; 
     let instructorQualifications = {}; 
     let isQualPanelExpanded = true;
+
+    const MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
     const STAGE_CHECK_TYPES = [
       'Private', 
@@ -416,6 +418,51 @@
       return hasZ ? new Date(Date.UTC(yr, mo, da, hr, mi, se)) : new Date(yr, mo, da, hr, mi, se);
     }
 
+    function parseExcludedDates(comment) {
+      const exclusions = [];
+      // Matches "except [the] 10th of August", "not on August 10", "except Aug 10th", "except 8/10"
+      const dateRegexes = [
+        /(?:except|not on|excluding|cannot do|can't do)\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+)/gi,
+        /(?:except|not on|excluding|cannot do|can't do)\s+([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/gi,
+        /(?:except|not on|excluding|cannot do|can't do)\s+(\d{1,2})\/(\d{1,2})/gi
+      ];
+
+      // Pattern 1: "except 10th of August"
+      let match;
+      const r1 = new RegExp(dateRegexes[0]);
+      while ((match = r1.exec(comment)) !== null) {
+        const day = parseInt(match[1], 10);
+        const monthName = match[2].toLowerCase();
+        const monthIndex = MONTH_NAMES.findIndex(m => m.startsWith(monthName.substring(0, 3)));
+        if (monthIndex !== -1 && !isNaN(day)) {
+          exclusions.push({ month: monthIndex, day: day });
+        }
+      }
+
+      // Pattern 2: "except August 10th"
+      const r2 = new RegExp(dateRegexes[1]);
+      while ((match = r2.exec(comment)) !== null) {
+        const monthName = match[1].toLowerCase();
+        const day = parseInt(match[2], 10);
+        const monthIndex = MONTH_NAMES.findIndex(m => m.startsWith(monthName.substring(0, 3)));
+        if (monthIndex !== -1 && !isNaN(day)) {
+          exclusions.push({ month: monthIndex, day: day });
+        }
+      }
+
+      // Pattern 3: "except 8/10"
+      const r3 = new RegExp(dateRegexes[2]);
+      while ((match = r3.exec(comment)) !== null) {
+        const monthIndex = parseInt(match[1], 10) - 1;
+        const day = parseInt(match[2], 10);
+        if (!isNaN(monthIndex) && !isNaN(day)) {
+          exclusions.push({ month: monthIndex, day: day });
+        }
+      }
+
+      return exclusions;
+    }
+
     function runComparison() {
       renderTable();
     }
@@ -444,7 +491,9 @@
 
         const comment = slot.comments.toLowerCase();
 
-        // Detect Hard Constraints (Strict Dealbreakers) vs Soft Preferences (Prioritized Fallback)
+        // Extract explicit date blacklists (e.g. "except August 10th")
+        const excludedDates = parseExcludedDates(comment);
+
         const isStrict = comment.includes('only') || comment.includes('must') || comment.includes('cannot') || comment.includes('can\'t');
         const allowsAnything = comment.includes('anything works') || comment.includes('either works') || comment.includes('anytime') || comment.includes('any day');
 
@@ -477,6 +526,15 @@
             if (isOpen && isFuture && !occupiedSlots.has(slotKey)) {
               let isHardConstraintViolated = false;
               let isPreferenceSatisfied = true;
+
+              // HARD CHECK: Explicit Date Exclusions (e.g. "except 10th of August")
+              const evMonth = ev.start.getMonth();
+              const evDay = ev.start.getDate();
+              const isDateBlacklisted = excludedDates.some(ex => ex.month === evMonth && ex.day === evDay);
+
+              if (isDateBlacklisted) {
+                isHardConstraintViolated = true; // Absolute dealbreaker
+              }
 
               // Parse "before X am/pm"
               const beforeMatch = comment.match(/before\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
@@ -541,7 +599,7 @@
           });
         });
 
-        // Assign preferred slot if found; otherwise fall back to any available slot
+        // Assign preferred slot if found; otherwise fall back to any available non-excluded slot
         const chosenCandidate = bestPreferredSlot || bestFallbackSlot;
 
         if (chosenCandidate) {
@@ -589,26 +647,23 @@
 
     function loadDemoData() {
       studentSlots = [
-        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'Mornings work better than afternoons but anything works.' },
-        { student: 'Cameron Walton', stageType: 'Instrument', availability: 'Mornings', comments: 'Needs Instrument check strictly after 2pm' },
-        { student: 'Jacob Mastromonico', stageType: 'Commercial Stage 2', availability: 'Fridays', comments: 'C2 check request' }
+        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'Everyday except the 10th of August, prefers the mornings.' }
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
-      const offset = 24 * 60 * 60 * 1000;
-      const dateTomorrow = new Date(Date.now() + offset);
-      
-      const afternoonSlot = new Date(dateTomorrow);
-      afternoonSlot.setHours(14, 0, 0, 0);
+      // Setup Aug 10 slot and Aug 11 slot to test date exclusion logic
+      const slotAug10 = new Date(2026, 7, 10, 10, 0, 0); // Aug 10 @ 10:00 AM
+      const slotAug11 = new Date(2026, 7, 11, 10, 0, 0); // Aug 11 @ 10:00 AM
 
       instructorsData = {
         "Blaine Oliver": [
-          { start: afternoonSlot, end: new Date(afternoonSlot.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
+          { start: slotAug10, end: new Date(slotAug10.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' },
+          { start: slotAug11, end: new Date(slotAug11.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
         ]
       };
 
       instructorQualifications = {
-        "Blaine Oliver": ["Private", "Instrument", "Commercial Stage 2"]
+        "Blaine Oliver": ["Private", "Instrument", "Commercial Stage 1"]
       };
 
       updateInstructorStatus();
