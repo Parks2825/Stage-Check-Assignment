@@ -14,7 +14,7 @@
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
         <p class="text-indigo-200 text-sm">Automated Assignment Engine with Stage Check Qualifications</p>
       </div>
-      <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
+      <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-505 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
       </button>
     </div>
@@ -162,17 +162,20 @@
         const combinedStatus = `${outcomeVal} ${availRaw} ${commText}`.toLowerCase();
         if (!combinedStatus.includes('pending')) continue;
 
+        // Enhanced parser detection for check types
         let detectedType = 'Private'; 
-        const checkSearchText = `${rawStage} ${commText}`.toLowerCase();
+        const searchString = `${rawStage} ${commText}`.toLowerCase();
         
-        if (checkSearchText.includes('instrument') || checkSearchText.includes('ifro') || checkSearchText.includes('inst')) {
+        if (searchString.match(/instrument|ifro|inst|i1|i2|i3|rating/i)) {
           detectedType = 'Instrument';
-        } else if (checkSearchText.includes('commercial') || checkSearchText.includes('cpo')) {
+        } else if (searchString.match(/commercial|cpo|c1|c2|comm/i)) {
           detectedType = 'Commercial';
-        } else if (checkSearchText.includes('multi')) {
+        } else if (searchString.match(/multi|me|meo/i)) {
           detectedType = 'Multi';
-        } else if (checkSearchText.includes('cfi')) {
+        } else if (searchString.match(/cfi|cfii|mei|instructor/i)) {
           detectedType = 'CFI';
+        } else if (searchString.match(/private|p1|p2|p3|ppl/i)) {
+          detectedType = 'Private';
         }
 
         let formattedAvail = availRaw.replace(/[\[\]"]/g, '').replace(/,/g, ', ');
@@ -236,7 +239,7 @@
         renderQualificationsUI();
         runComparison();
       } catch (err) {
-        alert(`CORS Restriction: Please download the .ics file and upload it manually via file input.`);
+        alert(`CORS Restriction: Please download the .ics file and upload it manually.`);
       }
     }
 
@@ -288,10 +291,21 @@
           
           const isChecked = instructorQualifications[inst] && instructorQualifications[inst].includes(type);
           
-          label.innerHTML = `
-            <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleQual('${inst}', '${type}')" class="rounded text-indigo-600 focus:ring-indigo-500"/>
-            <span>${type}</span>
-          `;
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = isChecked;
+          input.className = 'rounded text-indigo-600 focus:ring-indigo-500';
+          
+          // Pure JavaScript binding avoids inline escaping bugs
+          input.addEventListener('change', () => {
+            toggleQual(inst, type);
+          });
+
+          const span = document.createElement('span');
+          span.textContent = type;
+
+          label.appendChild(input);
+          label.appendChild(span);
           checkboxesDiv.appendChild(label);
         });
 
@@ -311,7 +325,6 @@
         instructorQualifications[instructor].push(checkType);
       }
       
-      // Instantly trigger re-matching and UI render
       runComparison();
     }
 
@@ -399,9 +412,12 @@
           const events = instructorsData[instName];
           if (!events || events.length === 0) return;
 
-          // Qualification Filter
+          // Case-insensitive clean verification array matching
           const quals = instructorQualifications[instName] || [];
-          if (!quals.includes(slot.stageType)) {
+          const reqTypeClean = (slot.stageType || '').toLowerCase();
+          const isQualified = quals.some(q => q.toLowerCase() === reqTypeClean);
+
+          if (!isQualified) {
             return; 
           }
 
@@ -500,7 +516,7 @@
 
     function loadDemoData() {
       studentSlots = [
-        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'Not with Jisoo' },
+        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'Not with Trevor' },
         { student: 'Cameron Walton', stageType: 'Instrument', availability: 'Mornings', comments: 'Needs Instrument check' },
         { student: 'Jacob Mastromonico', stageType: 'Commercial', availability: 'Fridays', comments: 'Commercial stage check request' }
       ];
