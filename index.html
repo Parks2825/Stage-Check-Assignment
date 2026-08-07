@@ -12,7 +12,7 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-4">
       <div>
         <h1 class="text-2xl font-bold">Schedule Availability Matcher</h1>
-        <p class="text-indigo-200 text-sm">Automated Priority Assignment Engine with Dynamic Date Exclusion Parsing</p>
+        <p class="text-indigo-200 text-sm">Automated Priority Assignment Engine with Multi-Date List Exclusion</p>
       </div>
       <button id="demoBtn" onclick="loadDemoData()" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded shadow transition text-sm">
         ⚡ Load Demo Data
@@ -191,7 +191,7 @@
         const name = row[nameIdx !== -1 ? nameIdx : 0];
         const availRaw = row[availIdx !== -1 ? availIdx : 4] || 'N/A';
         const commText = row[commIdx !== -1 ? commIdx : 5] || 'None';
-        const rawStage = stageIdx !== -1 ? row[stageIdx] : '';
+        const rawStage = stageIdx !== -1 ? row[row.length - 1] : ''; 
         const outcomeVal = row[outcomeIdx !== -1 ? outcomeIdx : 12] || '';
 
         const combinedStatus = `${outcomeVal} ${availRaw} ${commText}`.toLowerCase();
@@ -256,7 +256,7 @@
       if (!/^https?:\/\//i.test(url)) url = 'https://' + url;
 
       try {
-        const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
+        const proxyUrl = `https://api.allorigins.win/raw?url=%60%2560%60%257BencodeURIComponent(url)%7D%60%2560%60`;
         let response = await fetch(proxyUrl);
         if (!response.ok) response = await fetch(url);
         const text = await response.text();
@@ -420,52 +420,45 @@
 
     function parseExcludedDates(comment) {
       const exclusions = [];
-      // Matches "except [the] 10th of August", "not on August 10", "except Aug 10th", "except 8/10"
-      const dateRegexes = [
-        /(?:except|not on|excluding|cannot do|can't do)\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+)/gi,
-        /(?:except|not on|excluding|cannot do|can't do)\s+([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/gi,
-        /(?:except|not on|excluding|cannot do|can't do)\s+(\d{1,2})\/(\d{1,2})/gi
-      ];
+      
+      // Look for explicit exclusion windows: "except...", "unavailable...", "not on..."
+      const blockRegex = /(?:except|unavailable|not on|excluding|cannot do|can't do)\s+([^.]+)/gi;
+      let blockMatch;
 
-      // Pattern 1: "except 10th of August"
-      let match;
-      const r1 = new RegExp(dateRegexes[0]);
-      while ((match = r1.exec(comment)) !== null) {
-        const day = parseInt(match[1], 10);
-        const monthName = match[2].toLowerCase();
-        const monthIndex = MONTH_NAMES.findIndex(m => m.startsWith(monthName.substring(0, 3)));
-        if (monthIndex !== -1 && !isNaN(day)) {
-          exclusions.push({ month: monthIndex, day: day });
+      while ((blockMatch = blockRegex.exec(comment)) !== null) {
+        const exclusionText = blockMatch[1].toLowerCase();
+        
+        // Find if a specific month is named anywhere in the constraint chunk
+        let monthIndex = new Date().getMonth(); // Default fallback to current month
+        MONTH_NAMES.forEach((m, idx) => {
+          if (exclusionText.includes(m) || exclusionText.includes(m.substring(0, 3))) {
+            monthIndex = idx;
+          }
+        });
+
+        // Tokenize numbers/days separated by commas, spaces, or "and"
+        const dayMatches = exclusionText.match(/\b\d{1,2}(?:st|nd|rd|th)?\b/g);
+        if (dayMatches) {
+          dayMatches.forEach(dayStr => {
+            const dayNum = parseInt(dayStr, 10);
+            if (!isNaN(dayNum) && dayNum >= 1 && dayNum <= 31) {
+              exclusions.push({ month: monthIndex, day: dayNum });
+            }
+          });
         }
       }
 
-      // Pattern 2: "except August 10th"
-      const r2 = new RegExp(dateRegexes[1]);
-      while ((match = r2.exec(comment)) !== null) {
-        const monthName = match[1].toLowerCase();
-        const day = parseInt(match[2], 10);
-        const monthIndex = MONTH_NAMES.findIndex(m => m.startsWith(monthName.substring(0, 3)));
-        if (monthIndex !== -1 && !isNaN(day)) {
-          exclusions.push({ month: monthIndex, day: day });
-        }
-      }
-
-      // Pattern 3: "except 8/10"
-      const r3 = new RegExp(dateRegexes[2]);
-      while ((match = r3.exec(comment)) !== null) {
-        const monthIndex = parseInt(match[1], 10) - 1;
-        const day = parseInt(match[2], 10);
-        if (!isNaN(monthIndex) && !isNaN(day)) {
-          exclusions.push({ month: monthIndex, day: day });
-        }
+      // Final structured fallback for explicit formats like 8/12 or 08/12 outside broad block phrases
+      const slashRegex = /\b(\d{1,2})\/(\d{1,2})\b/g;
+      let slashMatch;
+      while ((slashMatch = slashRegex.exec(comment)) !== null) {
+        exclusions.push({ month: parseInt(slashMatch[1], 10) - 1, day: parseInt(slashMatch[2], 10) });
       }
 
       return exclusions;
     }
 
-    function runComparison() {
-      renderTable();
-    }
+    runComparison();
 
     function renderTable() {
       const tbody = document.getElementById('resultsTable');
@@ -490,12 +483,10 @@
         let matchReason = "Requires manual scheduling coordination";
 
         const comment = slot.comments.toLowerCase();
-
-        // Extract explicit date blacklists (e.g. "except August 10th")
         const excludedDates = parseExcludedDates(comment);
 
-        const isStrict = comment.includes('only') || comment.includes('must') || comment.includes('cannot') || comment.includes('can\'t');
-        const allowsAnything = comment.includes('anything works') || comment.includes('either works') || comment.includes('anytime') || comment.includes('any day');
+        const isStrict = comment.includes('only') || comment.includes('must') || comment.includes('cannot') || comment.includes('can\'t') || comment.includes('unavailable');
+        const allowsAnything = comment.includes('anything works') || comment.includes('either works') || comment.includes('anytime') || comment.includes('any day') || comment.includes('best');
 
         let bestPreferredSlot = null;
         let bestFallbackSlot = null;
@@ -504,142 +495,92 @@
           const events = instructorsData[instName];
           if (!events || events.length === 0) return;
 
-          // Qualification Check
           const quals = instructorQualifications[instName] || [];
-          const reqTypeClean = (slot.stageType || '').toLowerCase();
-          if (!quals.some(q => q.toLowerCase() === reqTypeClean)) return;
+          if (!quals.some(q => q.toLowerCase() === (slot.stageType || '').toLowerCase())) return;
 
-          // Negative Instructor Constraint Check ("Not with...")
           const nameClean = instName.toLowerCase();
-          const instLastName = nameClean.split(' ').pop();
-          if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${instLastName}`)) return;
+          if (comment.includes(`not with ${nameClean}`) || comment.includes(`not with ${nameClean.split(' ').pop()}`)) return;
 
           events.forEach(ev => {
             const sum = (ev.summary || '').toLowerCase();
-            const isExplicitlyOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window');
-            const isFreeStatus = ev.transparent || ev.busyStatus === 'FREE';
-            const isOpen = isExplicitlyOpen || isFreeStatus;
-            const isFuture = ev.start > now;
+            const isOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window') || ev.transparent || ev.busyStatus === 'FREE';
             
-            const slotKey = `${instName}_${ev.start.toISOString()}`;
+            if (isOpen && ev.start > now && !occupiedSlots.has(`${instName}_${ev.start.toISOString()}`)) {
+              
+              // HARD EXCLUSION CHECK
+              if (excludedDates.some(ex => ex.month === ev.start.getMonth() && ex.day === ev.start.getDate())) {
+                return; // Direct Dealbreaker
+              }
 
-            if (isOpen && isFuture && !occupiedSlots.has(slotKey)) {
               let isHardConstraintViolated = false;
               let isPreferenceSatisfied = true;
-
-              // HARD CHECK: Explicit Date Exclusions (e.g. "except 10th of August")
-              const evMonth = ev.start.getMonth();
-              const evDay = ev.start.getDate();
-              const isDateBlacklisted = excludedDates.some(ex => ex.month === evMonth && ex.day === evDay);
-
-              if (isDateBlacklisted) {
-                isHardConstraintViolated = true; // Absolute dealbreaker
-              }
 
               // Parse "before X am/pm"
               const beforeMatch = comment.match(/before\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
               if (beforeMatch) {
                 let maxHour = parseInt(beforeMatch[1], 10);
-                const period = beforeMatch[3] ? beforeMatch[3].toLowerCase() : null;
-                if (period === 'pm' && maxHour < 12) maxHour += 12;
-                if (period === 'am' && maxHour === 12) maxHour = 0;
-                if (!period && maxHour < 8) maxHour += 12;
-
+                if (beforeMatch[3]?.toLowerCase() === 'pm' && maxHour < 12) maxHour += 12;
+                if (!beforeMatch[3] && maxHour < 8) maxHour += 12;
                 if (ev.start.getHours() >= maxHour) {
                   if (isStrict) isHardConstraintViolated = true;
                   isPreferenceSatisfied = false;
                 }
               }
 
-              // Parse "after X am/pm"
-              const afterMatch = comment.match(/after\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-              if (afterMatch) {
-                let minHour = parseInt(afterMatch[1], 10);
-                const period = afterMatch[3] ? afterMatch[3].toLowerCase() : null;
-                if (period === 'pm' && minHour < 12) minHour += 12;
-                if (period === 'am' && minHour === 12) minHour = 0;
-                if (!period && minHour < 8) minHour += 12;
+              // Parse Day of Week Preferences (e.g., "tuesday", "thursday", "saturday")
+              const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+              let hasDayPreferences = false;
+              let isDayMatched = false;
 
-                if (ev.start.getHours() < minHour) {
-                  if (isStrict) isHardConstraintViolated = true;
-                  isPreferenceSatisfied = false;
+              daysOfWeek.forEach((dayName, index) => {
+                if (comment.includes(dayName)) {
+                  hasDayPreferences = true;
+                  if (ev.start.getDay() === index) isDayMatched = true;
                 }
+              });
+
+              if (hasDayPreferences && !isDayMatched) {
+                isPreferenceSatisfied = false;
               }
 
-              // Keyword Soft Preference Checks
-              if (comment.includes('morning') && ev.start.getHours() >= 12) {
-                if (isStrict && !allowsAnything) isHardConstraintViolated = true;
-                isPreferenceSatisfied = false;
-              }
-              if (comment.includes('afternoon') && ev.start.getHours() < 12) {
-                if (isStrict && !allowsAnything) isHardConstraintViolated = true;
-                isPreferenceSatisfied = false;
-              }
+              // Keyword Time Preference Checks
+              if (comment.includes('morning') && ev.start.getHours() >= 12) isPreferenceSatisfied = false;
+              if (comment.includes('afternoon') && ev.start.getHours() < 12) isPreferenceSatisfied = false;
 
               if (isHardConstraintViolated) return;
 
               const candidate = {
                 instructor: instName,
-                slotKey: slotKey,
+                slotKey: `${instName}_${ev.start.toISOString()}`,
                 timeMs: ev.start.getTime(),
                 formattedTime: `${ev.start.toLocaleDateString([], { month: 'numeric', day: 'numeric' })} @ ${ev.start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
               };
 
-              // Track earliest preferred slot vs earliest fallback slot
               if (isPreferenceSatisfied || allowsAnything) {
-                if (!bestPreferredSlot || candidate.timeMs < bestPreferredSlot.timeMs) {
-                  bestPreferredSlot = candidate;
-                }
+                if (!bestPreferredSlot || candidate.timeMs < bestPreferredSlot.timeMs) bestPreferredSlot = candidate;
               } else {
-                if (!bestFallbackSlot || candidate.timeMs < bestFallbackSlot.timeMs) {
-                  bestFallbackSlot = candidate;
-                }
+                if (!bestFallbackSlot || candidate.timeMs < bestFallbackSlot.timeMs) bestFallbackSlot = candidate;
               }
             }
           });
         });
 
-        // Assign preferred slot if found; otherwise fall back to any available non-excluded slot
         const chosenCandidate = bestPreferredSlot || bestFallbackSlot;
-
         if (chosenCandidate) {
           occupiedSlots.add(chosenCandidate.slotKey);
           assignedChecker = chosenCandidate.instructor;
           assignedTime = chosenCandidate.formattedTime;
-          matchReason = bestPreferredSlot 
-            ? "Matched requested time preference" 
-            : "Assigned available fallback slot (preferred time unavailable)";
+          matchReason = bestPreferredSlot ? "Matched requested time & day preference" : "Assigned fallback slot";
         }
-
-        const badgeClass = assignedChecker !== "Unassigned" 
-          ? "bg-emerald-100 text-emerald-800 border-emerald-200 font-semibold text-xs px-2.5 py-1 rounded-full border"
-          : "bg-amber-100 text-amber-800 border-amber-200 font-semibold text-xs px-2.5 py-1 rounded-full border";
 
         const tr = document.createElement('tr');
         tr.className = 'hover:bg-slate-50 transition';
-
         tr.innerHTML = `
           <td class="p-4 font-semibold text-slate-800">${slot.student}</td>
-          <td class="p-4 text-slate-700 font-medium">
-            <span class="inline-block bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded text-xs border border-indigo-200 font-semibold">
-              ✈️ ${slot.stageType}
-            </span>
-          </td>
-          <td class="p-4 text-xs text-slate-600 max-w-sm">
-            <p class="bg-amber-50 text-amber-900 border border-amber-200/80 p-2 rounded-md">
-              ${slot.comments}
-            </p>
-          </td>
-          <td class="p-4">
-            <span class="${badgeClass}" title="${matchReason}">
-              👤 ${assignedChecker}
-            </span>
-          </td>
-          <td class="p-4 font-medium text-slate-700 text-xs">
-            <span class="inline-flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded">
-              ⏰ ${assignedTime}
-            </span>
-          </td>
+          <td class="p-4 text-slate-700 font-medium"><span class="bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded text-xs border border-indigo-200 font-semibold">✈️ ${slot.stageType}</span></td>
+          <td class="p-4 text-xs text-slate-600 max-w-sm"><p class="bg-amber-50 text-amber-900 border border-amber-200/80 p-2 rounded-md">${slot.comments}</p></td>
+          <td class="p-4"><span class="${assignedChecker !== 'Unassigned' ? 'bg-emerald-100 text-emerald-800 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-200'} font-semibold text-xs px-2.5 py-1 rounded-full border" title="${matchReason}">👤 ${assignedChecker}</span></td>
+          <td class="p-4 font-medium text-slate-700 text-xs"><span class="inline-flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-200 px-2 py-1 rounded">⏰ ${assignedTime}</span></td>
         `;
         tbody.appendChild(tr);
       });
@@ -647,25 +588,22 @@
 
     function loadDemoData() {
       studentSlots = [
-        { student: 'Easton Jettie', stageType: 'Private', availability: 'Weekdays', comments: 'Everyday except the 10th of August, prefers the mornings.' }
+        { student: 'Easton Jettie', stageType: 'Private', availability: 'Custom', comments: 'Tuesday Thursday Saturday mornings best, unavailable August 9th, 12th, 13th, 17th' }
       ];
       document.getElementById('studentStats').innerHTML = `<span class="text-emerald-600">✓ Step 1 Complete: Loaded Demo Pending Records</span>`;
 
-      // Setup Aug 10 slot and Aug 11 slot to test date exclusion logic
-      const slotAug10 = new Date(2026, 7, 10, 10, 0, 0); // Aug 10 @ 10:00 AM
-      const slotAug11 = new Date(2026, 7, 11, 10, 0, 0); // Aug 11 @ 10:00 AM
+      // Set up a block on the forbidden Aug 12, and a valid fallback choice on Thursday, Aug 13 or Sat Aug 15
+      const forbiddenSlot = new Date(2026, 7, 12, 10, 0, 0); // Wed Aug 12 (Blocked)
+      const validSlot = new Date(2026, 7, 15, 09, 30, 0);    // Sat Aug 15 (Valid match)
 
       instructorsData = {
         "Blaine Oliver": [
-          { start: slotAug10, end: new Date(slotAug10.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' },
-          { start: slotAug11, end: new Date(slotAug11.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
+          { start: forbiddenSlot, end: new Date(forbiddenSlot.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' },
+          { start: validSlot, end: new Date(validSlot.getTime() + 7200000), summary: "Available", transparent: true, busyStatus: 'FREE' }
         ]
       };
 
-      instructorQualifications = {
-        "Blaine Oliver": ["Private", "Instrument", "Commercial Stage 1"]
-      };
-
+      instructorQualifications = { "Blaine Oliver": ["Private"] };
       updateInstructorStatus();
       renderQualificationsUI();
       runComparison();
