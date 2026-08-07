@@ -417,39 +417,37 @@
 
     function parseExcludedDates(comment) {
       const exclusions = [];
-      const dateRegexes = [
-        /(?:except|not on|excluding|cannot do|can't do)\s+(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?([a-z]+)/gi,
-        /(?:except|not on|excluding|cannot do|can't do)\s+([a-z]+)\s+(\d{1,2})(?:st|nd|rd|th)?/gi,
-        /(?:except|not on|excluding|cannot do|can't do)\s+(\d{1,2})\/(\d{1,2})/gi
-      ];
+      const lower = comment.toLowerCase();
 
-      let match;
-      const r1 = new RegExp(dateRegexes[0]);
-      while ((match = r1.exec(comment)) !== null) {
-        const day = parseInt(match[1], 10);
-        const monthName = match[2].toLowerCase();
-        const monthIndex = MONTH_NAMES.findIndex(m => m.startsWith(monthName.substring(0, 3)));
-        if (monthIndex !== -1 && !isNaN(day)) {
-          exclusions.push({ month: monthIndex, day: day });
-        }
-      }
+      // Look for negative unavailability clauses
+      const negRegex = /(?:unavailable|except|not on|excluding|cannot do|can't do|can't make|out|off)\s+([^.;!\n]+)/gi;
+      let negMatch;
 
-      const r2 = new RegExp(dateRegexes[1]);
-      while ((match = r2.exec(comment)) !== null) {
-        const monthName = match[1].toLowerCase();
-        const day = parseInt(match[2], 10);
-        const monthIndex = MONTH_NAMES.findIndex(m => m.startsWith(monthName.substring(0, 3)));
-        if (monthIndex !== -1 && !isNaN(day)) {
-          exclusions.push({ month: monthIndex, day: day });
-        }
-      }
+      while ((negMatch = negRegex.exec(lower)) !== null) {
+        const phrase = negMatch[1];
 
-      const r3 = new RegExp(dateRegexes[2]);
-      while ((match = r3.exec(comment)) !== null) {
-        const monthIndex = parseInt(match[1], 10) - 1;
-        const day = parseInt(match[2], 10);
-        if (!isNaN(monthIndex) && !isNaN(day)) {
-          exclusions.push({ month: monthIndex, day: day });
+        // Parse month followed by single/multiple day numbers (e.g. "August 9th, 12th, 13th, 17th")
+        MONTH_NAMES.forEach((mName, mIdx) => {
+          const shortMonth = mName.substring(0, 3);
+          if (phrase.includes(mName) || phrase.includes(shortMonth)) {
+            const dayMatches = phrase.matchAll(/\b(\d{1,2})(?:st|nd|rd|th)?\b/g);
+            for (const dMatch of dayMatches) {
+              const day = parseInt(dMatch[1], 10);
+              if (day >= 1 && day <= 31) {
+                exclusions.push({ month: mIdx, day: day });
+              }
+            }
+          }
+        });
+
+        // Parse slash format (e.g. "8/9, 8/12, 8/13")
+        const slashMatches = phrase.matchAll(/\b(\d{1,2})\/(\d{1,2})\b/g);
+        for (const sMatch of slashMatches) {
+          const mIdx = parseInt(sMatch[1], 10) - 1;
+          const day = parseInt(sMatch[2], 10);
+          if (mIdx >= 0 && mIdx <= 11 && day >= 1 && day <= 31) {
+            exclusions.push({ month: mIdx, day: day });
+          }
         }
       }
 
@@ -486,7 +484,7 @@
 
         const excludedDates = parseExcludedDates(comment);
 
-        const isStrict = comment.includes('only') || comment.includes('must') || comment.includes('cannot') || comment.includes('can\'t');
+        const isStrict = comment.includes('only') || comment.includes('must') || comment.includes('cannot') || comment.includes('can\'t') || comment.includes('unavailable');
         const allowsAnything = comment.includes('anything works') || comment.includes('either works') || comment.includes('anytime') || comment.includes('any day');
 
         let bestPreferredSlot = null;
@@ -509,7 +507,7 @@
             const isExplicitlyOpen = sum.includes('available') || sum.includes('open') || sum.includes('shift') || sum.includes('stage check window');
             const isFreeStatus = ev.transparent || ev.busyStatus === 'FREE';
             const isOpen = isExplicitlyOpen || isFreeStatus;
-            const isFuture = ev.start > now; // Strict check for future slots
+            const isFuture = ev.start > now;
             
             const slotKey = `${instName}_${ev.start.toISOString()}`;
 
@@ -522,7 +520,7 @@
               const isDateBlacklisted = excludedDates.some(ex => ex.month === evMonth && ex.day === evDay);
 
               if (isDateBlacklisted) {
-                isHardConstraintViolated = true;
+                isHardConstraintViolated = true; // Hard dealbreaker
               }
 
               const beforeMatch = comment.match(/before\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
