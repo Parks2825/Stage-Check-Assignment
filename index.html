@@ -68,13 +68,23 @@
 
     </div>
 
-    <!-- QUALIFICATIONS CONFIGURATION PANEL -->
-    <div id="qualificationsPanel" class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 hidden">
-      <h2 class="text-lg font-bold text-slate-800 mb-2 flex items-center gap-2">
-        ⚙️ Stage Checker Qualifications
-      </h2>
-      <p class="text-xs text-slate-500 mb-4">Select which stage checks each instructor is authorized to perform:</p>
-      <div id="instructorQualList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs"></div>
+    <!-- EXPANDABLE QUALIFICATIONS CONFIGURATION PANEL -->
+    <div id="qualificationsPanel" class="bg-white rounded-xl shadow-sm border border-slate-200 hidden overflow-hidden transition-all duration-200">
+      <button id="toggleQualPanelBtn" onclick="toggleQualPanelCollapse()" class="w-full p-6 text-left flex justify-between items-center hover:bg-slate-50/80 transition focus:outline-none">
+        <div>
+          <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+            ⚙️ Stage Checker Qualifications
+          </h2>
+          <p class="text-xs text-slate-500 mt-0.5">Select which stage checks each instructor is authorized to perform:</p>
+        </div>
+        <span id="qualPanelChevron" class="text-slate-400 font-bold text-sm transform transition-transform duration-200">
+          ▲
+        </span>
+      </button>
+
+      <div id="qualPanelBody" class="px-6 pb-6 pt-0">
+        <div id="instructorQualList" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-xs"></div>
+      </div>
     </div>
 
     <!-- COMPARISON RESULTS TABLE -->
@@ -115,8 +125,8 @@
     let studentSlots = [];     
     let instructorsData = {}; 
     let instructorQualifications = {}; 
+    let isQualPanelExpanded = true;
 
-    // Updated to split Commercial into Stage 1, 2, and 3
     const STAGE_CHECK_TYPES = [
       'Private', 
       'Instrument', 
@@ -129,6 +139,20 @@
 
     document.getElementById('csvInput').addEventListener('change', handleCSVUpload);
     document.getElementById('icsInput').addEventListener('change', handleICSUpload);
+
+    function toggleQualPanelCollapse() {
+      const body = document.getElementById('qualPanelBody');
+      const chevron = document.getElementById('qualPanelChevron');
+      
+      isQualPanelExpanded = !isQualPanelExpanded;
+      if (isQualPanelExpanded) {
+        body.classList.remove('hidden');
+        chevron.style.transform = 'rotate(0deg)';
+      } else {
+        body.classList.add('hidden');
+        chevron.style.transform = 'rotate(180deg)';
+      }
+    }
 
     async function handleCSVUpload(e) {
       const file = e.target.files[0];
@@ -176,16 +200,14 @@
         
         if (searchString.match(/instrument|ifro|inst|i1|i2|i3|rating/i)) {
           detectedType = 'Instrument';
-        } 
-        // Targeted breakdown parsing for Commercial stages
-        else if (searchString.match(/commercial.*1|c1|comm.*1/i)) {
+        } else if (searchString.match(/commercial.*1|c1|comm.*1/i)) {
           detectedType = 'Commercial Stage 1';
         } else if (searchString.match(/commercial.*2|c2|comm.*2/i)) {
           detectedType = 'Commercial Stage 2';
         } else if (searchString.match(/commercial.*3|c3|comm.*3/i)) {
           detectedType = 'Commercial Stage 3';
         } else if (searchString.match(/commercial|cpo|comm/i)) {
-          detectedType = 'Commercial Stage 1'; // Default baseline fallback
+          detectedType = 'Commercial Stage 1'; 
         } else if (searchString.match(/multi|me|meo/i)) {
           detectedType = 'Multi';
         } else if (searchString.match(/cfi|cfii|mei|instructor/i)) {
